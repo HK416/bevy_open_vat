@@ -11,3 +11,6 @@ bevy = { version = "0.18", default-features = false, features = [
     "bevy_render",
     "bevy_pbr",
 ]}
+
+[dev-dependencies]
+bevy = "0.18"
