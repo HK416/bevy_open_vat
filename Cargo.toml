@@ -1,0 +1,13 @@
+[package]
+name = "bevy_open_vat"
+version = "0.18.0"
+edition = "2024"
+description = "OpenVAT (Vertex Animation Texture) plugin for Bevy"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+bevy = { version = "0.18", default-features = false, features = [
+    "3d_bevy_render",
+    "bevy_render",
+    "bevy_pbr",
+]}
