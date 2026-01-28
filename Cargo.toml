@@ -13,4 +13,6 @@ bevy = { version = "0.18", default-features = false, features = [
 ]}
 
 [dev-dependencies]
-bevy = "0.18"
+bevy = { version = "0.18", features = ["exr"] }
+bevy_common_assets = { version = "0.15", features = ["json"] }
+serde = { version = "1", features = ["derive"] }

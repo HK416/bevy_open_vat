@@ -60,7 +60,7 @@ pub fn update_instance_data(
     // Collect data for all active controllers
     for (index, (entity, controller)) in controller_query.iter().enumerate() {
         gpu_data_vec.push(VatInstanceData {
-            timer: controller.timer,
+            timer: controller.timer * controller.current_clip.sampling_fps,
         });
 
         // Assign an index to the entity so the shader knows which instance data to read

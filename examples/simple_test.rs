@@ -28,7 +28,7 @@ fn setup(
 ) {
     // Create a simple plane mesh
     let mut plane_mesh = Mesh::from(Plane3d::default().mesh().size(1.0, 1.0));
-    
+
     // Assign unique UV1 coordinates to each vertex.
     // In VAT, UV1 is often used to index into the VAT texture's X-axis (vertex index).
     plane_mesh.insert_attribute(
@@ -117,27 +117,27 @@ fn setup(
 }
 
 /// Generates a procedural VAT texture where vertices move in a sinusoidal "bounce".
-/// 
+///
 /// Texture Layout:
 /// - Rows 0..frame_count: Position offsets (XYZ)
 /// - Rows frame_count..frame_count*2: Normal vectors
 fn create_bounce_texture(vertex_count: u32, frame_count: u32) -> Image {
     let mut data = Vec::new();
-    
+
     // Generate Position Data
     for f in 0..frame_count {
         for _v in 0..vertex_count {
             let t = (f as f32 / frame_count as f32) * std::f32::consts::TAU;
             let y_offset = t.sin() * 2.0;
             data.extend_from_slice(&0.0f32.to_le_bytes()); // X
-            data.extend_from_slice(&y_offset.to_le_bytes()); // Y
-            data.extend_from_slice(&0.0f32.to_le_bytes()); // Z
+            data.extend_from_slice(&0.0f32.to_le_bytes()); // Y
+            data.extend_from_slice(&y_offset.to_le_bytes()); // Z
             data.extend_from_slice(&1.0f32.to_le_bytes()); // W (Padding/Extra)
         }
     }
 
     // Generate Normal Data (pointing straight up for simplicity)
-    for _f in 0..frame_count {
+    for _f in 0..frame_count + 1 {
         for _v in 0..vertex_count {
             data.extend_from_slice(&0.0f32.to_le_bytes());
             data.extend_from_slice(&1.0f32.to_le_bytes());
@@ -149,7 +149,7 @@ fn create_bounce_texture(vertex_count: u32, frame_count: u32) -> Image {
     Image::new(
         Extent3d {
             width: vertex_count,
-            height: frame_count * 2,
+            height: frame_count + frame_count + 1,
             depth_or_array_layers: 1,
         },
         TextureDimension::D2,

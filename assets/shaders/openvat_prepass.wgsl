@@ -41,26 +41,20 @@ fn apply_vat(time: f32, v_pos: vec3<f32>, uv_vat: vec2<f32>) -> mat2x3<f32> {
     let blend = fract(frame_time);
 
     let frame_step = 1.0 / ext.y_resolution;
-    let uv_curr = uv_vat + vec2<f32>(0.0, current_frame * frame_step + frame_step * 0.5);
-    let uv_next = uv_vat + vec2<f32>(0.0, next_frame * frame_step + frame_step * 0.5);
+    let uv_curr = uv_vat + vec2<f32>(0.0, current_frame * frame_step);
+    let uv_next = uv_vat + vec2<f32>(0.0, next_frame * frame_step);
 
     let pos_curr = textureSampleLevel(vat_texture, vat_sampler, uv_curr, 0).rgb;
     let pos_next = textureSampleLevel(vat_texture, vat_sampler, uv_next, 0).rgb;
-    let pos_mixed = v_pos + mix(pos_curr, pos_next, blend);
+    let pos_mixed = mix(pos_curr, pos_next, blend);
 
     let range = ext.max_pos - ext.min_pos;
     let obj_pos = ext.min_pos + pos_mixed * range;
 
-    // let final_pos = vec3<f32>(
-    //     obj_pos.x,
-    //     ext.min_pos.z + pos_mixed.z * range.z,
-    //     -(ext.min_pos.y + pos_mixed.y * range.y)
-    // );
-
     let final_pos = vec3<f32>(
         obj_pos.x,
-        ext.min_pos.y + pos_mixed.y * range.y,
-        ext.min_pos.z + pos_mixed.z * range.z
+        ext.min_pos.z + pos_mixed.z * range.z,
+        -(ext.min_pos.y + pos_mixed.y * range.y)
     );
 
     let norm_curr_tex = textureSampleLevel(vat_texture, vat_sampler, uv_curr + vec2<f32>(0.0, 0.5), 0).rgb;
@@ -71,7 +65,7 @@ fn apply_vat(time: f32, v_pos: vec3<f32>, uv_vat: vec2<f32>) -> mat2x3<f32> {
 
     let final_norm = normalize(mix(n_curr, n_next, blend));
 
-    return mat2x3<f32>(final_pos, final_norm);
+    return mat2x3<f32>(v_pos + final_pos, final_norm);
 }
 
 // --- Vertex Shader ---
