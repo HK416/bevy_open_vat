@@ -3,17 +3,9 @@
 #import bevy_pbr::mesh_functions::mesh_position_local_to_world;
 #import bevy_pbr::mesh_functions::mesh_normal_local_to_world;
 #import bevy_pbr::view_transformations::position_world_to_clip
-#import bevy_pbr::forward_io::VertexOutput;
+#import bevy_pbr::prepass_io::{Vertex, VertexOutput};
 
 // --- Structures ---
-
-struct Vertex {
-    @builtin(instance_index) instance_index: u32,
-    @location(0) position: vec3<f32>,
-    @location(1) normal: vec3<f32>,
-    @location(2) uv: vec2<f32>,
-    @location(3) uv_b: vec2<f32>,
-}
 
 struct OpenVatParams {
     min_pos: vec3<f32>,
@@ -100,13 +92,23 @@ fn main(vertex: Vertex) -> VertexOutput {
     // Local -> World (Position)
     out.world_position = mesh_position_local_to_world(world_from_local, vec4<f32>(new_position, 1.0));
     
-    // Local -> World (Normal)
-    out.world_normal = mesh_normal_local_to_world(new_normal, vertex.instance_index);
-    
     // World -> Clip
     out.position = position_world_to_clip(out.world_position.xyz);
     
+#ifdef VERTEX_UVS_A
     out.uv = vertex.uv;
-    
+#endif
+
+#ifdef VERTEX_UVS_B
+    out.uv_b = vertex.uv_b;
+#endif 
+
+#ifdef NORMAL_PREPASS_OR_DEFERRED_PREPASS
+#ifdef VERTEX_NORMALS
+    // Local -> World (Normal)
+    out.world_normal = mesh_normal_local_to_world(new_normal, vertex.instance_index);
+#endif
+#endif
+
     return out;
 }

@@ -7,6 +7,8 @@ use crate::{
     material::OpenVatExtension,
 };
 
+/// Updates the `VatAnimationController` components, advancing their timers based on delta time and playback speed.
+/// Handles looping logic (Once vs Loop).
 pub fn update_anim_controller(time: Res<Time>, mut query: Query<&mut VatAnimationController>) {
     let dt = time.delta_secs();
 
@@ -44,6 +46,8 @@ pub fn update_anim_controller(time: Res<Time>, mut query: Query<&mut VatAnimatio
     }
 }
 
+/// Synchronizes the CPU-side animation state with the GPU via a storage buffer.
+/// Assigns `MeshTag`s (instance indices) to entities and uploads `VatInstanceData`.
 pub fn update_instance_data(
     mut commands: Commands,
     controller_query: Query<(Entity, &VatAnimationController)>,
@@ -53,11 +57,13 @@ pub fn update_instance_data(
 ) {
     let mut gpu_data_vec: Vec<VatInstanceData> = Vec::with_capacity(controller_query.iter().len());
 
+    // Collect data for all active controllers
     for (index, (entity, controller)) in controller_query.iter().enumerate() {
         gpu_data_vec.push(VatInstanceData {
             timer: controller.timer,
         });
 
+        // Assign an index to the entity so the shader knows which instance data to read
         commands.entity(entity).insert(MeshTag(index as u32));
     }
 
@@ -65,6 +71,7 @@ pub fn update_instance_data(
         return;
     }
 
+    // Update the storage buffer for all materials using this extension
     for mat_handle in mat_query.iter() {
         if let Some(mat) = materials.get_mut(&mat_handle.0) {
             if let Some(buffer) = buffers.get_mut(&mat.extension.instance) {

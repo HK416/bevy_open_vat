@@ -3,6 +3,7 @@ use bevy::{pbr::ExtendedMaterial, prelude::*};
 use crate::material::OpenVatExtension;
 use crate::system::{update_anim_controller, update_instance_data};
 
+/// Plugin that sets up the VAT material extension and animation update systems.
 pub struct OpenVatPlugin;
 
 impl Plugin for OpenVatPlugin {
