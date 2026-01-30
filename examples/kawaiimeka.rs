@@ -1,13 +1,17 @@
-use bevy::{pbr::ExtendedMaterial, prelude::*, render::storage::ShaderStorageBuffer};
-use bevy_common_assets::json::JsonAssetPlugin;
+use bevy::{
+    mesh::MeshTag, pbr::ExtendedMaterial, platform::collections::HashMap, prelude::*,
+    render::storage::ShaderStorageBuffer,
+};
 use bevy_open_vat::{data::VatInstanceData, prelude::*};
-use serde::Deserialize;
+
+const NUM_WIDTH: usize = 50;
+const NUM_DEPTH: usize = 50;
+const SPACING: f32 = 5.0;
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugins(OpenVatPlugin)
-        .add_plugins(JsonAssetPlugin::<RemapInfo>::new(&["json"]))
         .add_systems(Startup, setup)
         .add_systems(
             Update,
@@ -19,7 +23,8 @@ fn main() {
 fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands.spawn((
         Camera3d::default(),
-        Transform::from_xyz(6.0, 6.0, 6.0).looking_at(Vec3::new(0.0, 1.0, 0.0), Vec3::Y),
+        Transform::from_xyz(200.0, 75.0, 200.0).looking_at(Vec3::new(30.0, 1.0, 30.0), Vec3::Y),
+        Msaa::Off,
     ));
 
     commands.spawn((
@@ -30,13 +35,24 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         Transform::from_xyz(4.0, 8.0, 3.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
-    commands.spawn(SceneRoot(asset_server.load(
-        GltfAssetLabel::Scene(0).from_asset("models/KawaiiMeka/KawaiiMeka.glb"),
-    )));
-
+    let scene_handle =
+        asset_server.load(GltfAssetLabel::Scene(0).from_asset("models/KawaiiMeka/KawaiiMeka.glb"));
     let remap_handle: Handle<RemapInfo> =
         asset_server.load("models/KawaiiMeka/KawaiiMeka-remap_info.json");
     let vat_handle: Handle<Image> = asset_server.load("models/KawaiiMeka/Collection_vat.exr");
+
+    for x in 0..NUM_WIDTH {
+        for z in 0..NUM_DEPTH {
+            commands.spawn((
+                SceneRoot(scene_handle.clone()),
+                Transform::from_xyz(
+                    x as f32 * SPACING - (NUM_WIDTH as f32 / 2.0) * SPACING,
+                    0.0,
+                    z as f32 * SPACING - (NUM_DEPTH as f32 / 2.0) * SPACING,
+                ),
+            ));
+        }
+    }
 
     commands.insert_resource(AssetHandles {
         remap_handle,
@@ -54,7 +70,10 @@ fn insert_extended_materials(
     mut buffers: ResMut<Assets<ShaderStorageBuffer>>,
     mut entity_query: Query<(Entity, &MeshMaterial3d<StandardMaterial>)>,
 ) {
-    if entity_query.is_empty() {
+    let target_count = NUM_WIDTH * NUM_DEPTH;
+    let entities: Vec<_> = entity_query.iter_mut().collect();
+
+    if entities.len() < target_count {
         return;
     }
 
@@ -69,35 +88,56 @@ fn insert_extended_materials(
         return;
     };
 
-    for (entity, mesh_material) in entity_query.iter_mut() {
-        if let Some(std_material) = std_materials.get(&mesh_material.0) {
-            let mut buffer = ShaderStorageBuffer::default();
-            buffer.set_data(vec![VatInstanceData::default()]);
+    let instance_data_vec: Vec<VatInstanceData> = Vec::with_capacity(entities.len());
+    let buffer_handle = buffers.add(ShaderStorageBuffer::from(&instance_data_vec));
 
-            let material = vat_materials.add(ExtendedMaterial {
-                base: std_material.clone(),
-                extension: OpenVatExtension {
-                    vat_texture: vat_texture.clone(),
-                    min_pos: remap_info.os_remap.min.into(),
-                    frame_count: remap_info.os_remap.frames,
-                    max_pos: remap_info.os_remap.max.into(),
-                    y_resolution,
-                    instance: buffers.add(buffer),
-                },
-            });
+    let mut material_cache: HashMap<
+        _,
+        Handle<ExtendedMaterial<StandardMaterial, OpenVatExtension>>,
+    > = HashMap::default();
+    for (index, (entity, old_mat)) in entities.into_iter().enumerate() {
+        let Some(std_material) = std_materials.get(&old_mat.0) else {
+            continue;
+        };
 
-            commands.entity(entity).insert((
-                MeshMaterial3d(material),
-                VatAnimationController {
-                    mode: VatAnimLoopMode::Loop,
-                    current_clip: VatAnimationClip {
-                        frame_count: remap_info.os_remap.frames,
-                        sampling_fps: 24.0,
+        match material_cache.get(&old_mat.0) {
+            Some(material) => {
+                commands.entity(entity).insert((
+                    MeshMaterial3d(material.clone()),
+                    VatAnimationController {
+                        remap_info: asset_handles.remap_handle.clone(),
+                        current_clip: "Idle".to_string(),
+                        ..Default::default()
                     },
-                    speed: 1.0,
-                    ..Default::default()
-                },
-            ));
+                    MeshTag(index as u32),
+                ));
+            }
+            None => {
+                let extended_material = ExtendedMaterial {
+                    base: std_material.clone(),
+                    extension: OpenVatExtension {
+                        vat_texture: vat_texture.clone(),
+                        min_pos: remap_info.os_remap.min.into(),
+                        frame_count: remap_info.os_remap.frames,
+                        max_pos: remap_info.os_remap.max.into(),
+                        y_resolution,
+                        instance: buffer_handle.clone(),
+                    },
+                };
+
+                let material = vat_materials.add(extended_material);
+                commands.entity(entity).insert((
+                    MeshMaterial3d(material.clone()),
+                    VatAnimationController {
+                        remap_info: asset_handles.remap_handle.clone(),
+                        current_clip: "Idle".to_string(),
+                        ..Default::default()
+                    },
+                    MeshTag(index as u32),
+                ));
+
+                material_cache.insert(old_mat.0.clone(), material);
+            }
         }
     }
 
@@ -108,20 +148,4 @@ fn insert_extended_materials(
 struct AssetHandles {
     remap_handle: Handle<RemapInfo>,
     vat_handle: Handle<Image>,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-pub struct OsRemap {
-    #[serde(rename = "Min")]
-    pub min: [f32; 3],
-    #[serde(rename = "Max")]
-    pub max: [f32; 3],
-    #[serde(rename = "Frames")]
-    pub frames: u32,
-}
-
-#[derive(Debug, Deserialize, Asset, TypePath, Clone)]
-pub struct RemapInfo {
-    #[serde(rename = "os-remap")]
-    pub os_remap: OsRemap,
 }

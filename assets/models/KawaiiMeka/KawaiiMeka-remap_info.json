@@ -12,5 +12,12 @@
         ],
         "Frames": 24
     },
-    "animations": {}
+    "animations": {
+        "Idle": {
+            "startFrame": 0,
+            "endFrame": 24,
+            "framerate": 24,
+            "looping": true
+        }
+    }
 }

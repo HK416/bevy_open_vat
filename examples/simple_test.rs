@@ -2,6 +2,7 @@ use bevy::{
     asset::RenderAssetUsages,
     mesh::VertexAttributeValues,
     pbr::ExtendedMaterial,
+    platform::collections::HashMap,
     prelude::*,
     render::{
         render_resource::{Extent3d, TextureDimension, TextureFormat},
@@ -23,6 +24,7 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut buffers: ResMut<Assets<ShaderStorageBuffer>>,
+    mut remap_infos: ResMut<Assets<RemapInfo>>,
     mut vat_materials: ResMut<Assets<ExtendedMaterial<StandardMaterial, OpenVatExtension>>>,
     mut images: ResMut<Assets<Image>>,
 ) {
@@ -48,6 +50,23 @@ fn setup(
     // Create a procedural texture that makes vertices "bounce"
     let vat_texture = create_bounce_texture(vertex_count, frame_count);
     let vat_texture_handle = images.add(vat_texture);
+
+    let remap_info = remap_infos.add(RemapInfo {
+        os_remap: OsRemap {
+            min: [0.0, 0.0, 0.0],
+            max: [1.0, 1.0, 1.0],
+            frames: frame_count,
+        },
+        animations: HashMap::from_iter([(
+            "Default".to_string(),
+            VatAnimationClip {
+                start_frame: 0,
+                end_frame: frame_count,
+                frame_rate: 10.0,
+                looping: true,
+            },
+        )]),
+    });
 
     // Initialize the VAT material extension
     let material = vat_materials.add(ExtendedMaterial {
@@ -79,11 +98,8 @@ fn setup(
                     Mesh3d(mesh_handle.clone()),
                     MeshMaterial3d(material.clone()),
                     VatAnimationController {
-                        mode: VatAnimLoopMode::Loop,
-                        current_clip: VatAnimationClip {
-                            frame_count,
-                            sampling_fps: 1.0,
-                        },
+                        remap_info: remap_info.clone(),
+                        current_clip: "Default".to_string(),
                         // Varying speed based on position to demonstrate independent control
                         speed: x as f32 / grid_width as f32
                             + z as f32 / grid_depth as f32

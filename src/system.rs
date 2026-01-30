@@ -3,13 +3,18 @@ use bevy::{
 };
 
 use crate::{
-    data::{VatAnimLoopMode, VatAnimationController, VatInstanceData},
+    asset::RemapInfo,
+    data::{VatAnimationController, VatInstanceData},
     material::OpenVatExtension,
 };
 
 /// Updates the `VatAnimationController` components, advancing their timers based on delta time and playback speed.
 /// Handles looping logic (Once vs Loop).
-pub fn update_anim_controller(time: Res<Time>, mut query: Query<&mut VatAnimationController>) {
+pub fn update_anim_controller(
+    time: Res<Time>,
+    remap_infos: Res<Assets<RemapInfo>>,
+    mut query: Query<&mut VatAnimationController>,
+) {
     let dt = time.delta_secs();
 
     for mut controller in query.iter_mut() {
@@ -17,16 +22,24 @@ pub fn update_anim_controller(time: Res<Time>, mut query: Query<&mut VatAnimatio
             continue;
         }
 
-        controller.timer += dt * controller.speed;
-
-        let duration = if controller.current_clip.sampling_fps > 0.0 {
-            controller.current_clip.frame_count as f32 / controller.current_clip.sampling_fps
-        } else {
-            1.0
+        let Some(remap_info) = remap_infos.get(&controller.remap_info) else {
+            warn!("RemapInfo asset not found for VatAnimationController");
+            continue;
+        };
+        let Some(clip) = remap_info.animations.get(&controller.current_clip) else {
+            warn!(
+                "Animation clip '{}' not found in RemapInfo",
+                controller.current_clip
+            );
+            continue;
         };
 
-        match controller.mode {
-            VatAnimLoopMode::Once => {
+        controller.timer += dt * controller.speed;
+
+        let duration = clip.duration().unwrap_or(1.0);
+
+        match clip.looping {
+            false => {
                 if controller.timer >= duration {
                     controller.timer = duration;
                     controller.is_playing = false;
@@ -35,7 +48,7 @@ pub fn update_anim_controller(time: Res<Time>, mut query: Query<&mut VatAnimatio
                     controller.is_playing = false;
                 }
             }
-            VatAnimLoopMode::Loop => {
+            true => {
                 if controller.timer >= duration {
                     controller.timer %= duration;
                 } else if controller.timer < 0.0 {
@@ -53,14 +66,27 @@ pub fn update_instance_data(
     controller_query: Query<(Entity, &VatAnimationController)>,
     mut materials: ResMut<Assets<ExtendedMaterial<StandardMaterial, OpenVatExtension>>>,
     mat_query: Query<&MeshMaterial3d<ExtendedMaterial<StandardMaterial, OpenVatExtension>>>,
+    remap_infos: Res<Assets<RemapInfo>>,
     mut buffers: ResMut<Assets<ShaderStorageBuffer>>,
 ) {
     let mut gpu_data_vec: Vec<VatInstanceData> = Vec::with_capacity(controller_query.iter().len());
 
     // Collect data for all active controllers
     for (index, (entity, controller)) in controller_query.iter().enumerate() {
+        let Some(remap_info) = remap_infos.get(&controller.remap_info) else {
+            warn!("RemapInfo asset not found for entity {:?}", entity);
+            continue;
+        };
+        let Some(clip) = remap_info.animations.get(&controller.current_clip) else {
+            warn!(
+                "Animation clip '{}' not found in RemapInfo for entity {:?}",
+                controller.current_clip, entity
+            );
+            continue;
+        };
+
         gpu_data_vec.push(VatInstanceData {
-            timer: controller.timer * controller.current_clip.sampling_fps,
+            timer: controller.timer * clip.frame_rate,
         });
 
         // Assign an index to the entity so the shader knows which instance data to read
