@@ -30,6 +30,10 @@ pub struct VatAnimationClip {
 }
 
 impl VatAnimationClip {
+    pub fn start_time(&self) -> f32 {
+        self.start_frame as f32 / self.frame_rate
+    }
+
     pub fn duration(&self) -> Option<f32> {
         if self.frame_rate <= 1.0 {
             return None;

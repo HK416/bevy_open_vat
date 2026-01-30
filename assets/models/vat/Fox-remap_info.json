@@ -1,0 +1,35 @@
+{
+    "os-remap": {
+        "Min": [
+            -29.9,
+            -65.5,
+            -40.7
+        ],
+        "Max": [
+            26.3,
+            71.3,
+            37.4
+        ],
+        "Frames": 128
+    },
+    "animations": {
+        "Walk": {
+            "startFrame": 0,
+            "endFrame": 17,
+            "framerate": 30,
+            "looping": true
+        },
+        "Run": {
+            "startFrame": 17,
+            "endFrame": 45,
+            "framerate": 30,
+            "looping": true
+        },
+        "Survey": {
+            "startFrame": 45,
+            "endFrame": 127,
+            "framerate": 30,
+            "looping": true
+        }
+    }
+}

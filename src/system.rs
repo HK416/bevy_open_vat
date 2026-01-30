@@ -86,7 +86,7 @@ pub fn update_instance_data(
         };
 
         gpu_data_vec.push(VatInstanceData {
-            timer: controller.timer * clip.frame_rate,
+            timer: clip.start_frame as f32 + controller.timer * clip.frame_rate,
         });
 
         // Assign an index to the entity so the shader knows which instance data to read
