@@ -1,12 +1,13 @@
 use bevy::{
-    pbr::MaterialExtension,
+    pbr::{ExtendedMaterial, MaterialExtension},
     prelude::*,
     render::{render_resource::AsBindGroup, storage::ShaderStorageBuffer},
     shader::ShaderRef,
 };
 
-const SHADER_ASSET_PATH: &str = "shaders/openvat_pbr.wgsl";
-const PREPASS_SHADER_ASSET_PATH: &str = "shaders/openvat_prepass.wgsl";
+use crate::plugin::{OPENVAT_PREPASS_SHADER_HANDLE, OPENVAT_SHADER_HANDLE};
+
+pub type VatStandardMaterial = ExtendedMaterial<StandardMaterial, OpenVatExtension>;
 
 /// A material extension that adds Vertex Animation Texture (VAT) support to StandardMaterial.
 #[derive(Debug, Default, Clone, Asset, AsBindGroup, Reflect)]
@@ -36,10 +37,10 @@ pub struct OpenVatExtension {
 
 impl MaterialExtension for OpenVatExtension {
     fn vertex_shader() -> ShaderRef {
-        SHADER_ASSET_PATH.into()
+        OPENVAT_SHADER_HANDLE.into()
     }
 
     fn prepass_vertex_shader() -> ShaderRef {
-        PREPASS_SHADER_ASSET_PATH.into()
+        OPENVAT_PREPASS_SHADER_HANDLE.into()
     }
 }

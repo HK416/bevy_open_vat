@@ -5,13 +5,22 @@ edition = "2024"
 description = "OpenVAT (Vertex Animation Texture) plugin for Bevy"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/hk416/bevy_open_vat"
-keywords = ["bevy", "gamedev", "vat", "animation"]
+readme = "README.md"
+keywords = ["bevy", "gamedev", "animation", "vat", "gpu"]
+categories = ["game-development", "rendering", "graphics"]
+exclude = [
+    "assets/models/*",
+    "assets/image.png",
+    "examples/*",
+    "Cargo.lock",
+]
 
 [dependencies]
 bevy = { version = "0.18", default-features = false, features = [
     "3d_bevy_render",
     "bevy_render",
     "bevy_pbr",
+    "bevy_log",
 ]}
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
