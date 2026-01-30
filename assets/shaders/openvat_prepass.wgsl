@@ -57,6 +57,16 @@ fn apply_vat(frame_index: f32, v_pos: vec3<f32>, uv_vat: vec2<f32>) -> mat2x3<f3
     let range = ext.max_pos - ext.min_pos;
     let obj_pos = ext.min_pos + pos_mixed * range;
 
+    // [Coordinate System Conversion]
+    // Blender (Z-up Right-handed) -> Bevy (Y-up Right-handed)
+    // Blender: Forward: -Y, Up: +Z, Right: +X
+    // Bevy:    Forward: -Z, Up: +Y, Right: +X
+    //
+    // Mapping Logic:
+    // Bevy.x = Blender.x
+    // Bevy.y = Blender.z
+    // Bevy.z = -Blender.y
+    //
     let final_pos = vec3<f32>(
         obj_pos.x,
         ext.min_pos.z + pos_mixed.z * range.z,
@@ -69,6 +79,8 @@ fn apply_vat(frame_index: f32, v_pos: vec3<f32>, uv_vat: vec2<f32>) -> mat2x3<f3
     var n_curr = norm_curr_tex * 2.0 - 1.0;
     var n_next = norm_next_tex * 2.0 - 1.0;
 
+    // Apply the same coordinate conversion to normal vectors
+    // (Swap Y <-> Z and invert Y for the new Z)
     n_curr = vec3<f32>(n_curr.x, n_curr.z, -n_curr.y);
     n_next = vec3<f32>(n_next.x, n_next.z, -n_next.y);
 

@@ -13,6 +13,6 @@ impl Plugin for OpenVatPlugin {
         app.init_asset::<RemapInfo>()
             .register_asset_loader(RemapInfoAssetLoader)
             .add_plugins(Plugin::default())
-            .add_systems(Update, update_instance_data);
+            .add_systems(PostUpdate, update_instance_data);
     }
 }

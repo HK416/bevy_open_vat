@@ -64,25 +64,39 @@ pub fn update_anim_controller(
 pub fn update_instance_data(
     mut commands: Commands,
     changed_query: Query<Entity, Changed<VatAnimationController>>,
-    controller_query: Query<(Entity, &VatAnimationController)>,
+    controller_query: Query<(Entity, &VatAnimationController, Option<&MeshTag>)>,
     mut materials: ResMut<Assets<ExtendedMaterial<StandardMaterial, OpenVatExtension>>>,
     mat_query: Query<&MeshMaterial3d<ExtendedMaterial<StandardMaterial, OpenVatExtension>>>,
     remap_infos: Res<Assets<RemapInfo>>,
     mut buffers: ResMut<Assets<ShaderStorageBuffer>>,
+    mut remap_events: MessageReader<AssetEvent<RemapInfo>>,
     mut last_count: Local<usize>,
 ) {
     let current_count = controller_query.iter().len();
     let any_changed = !changed_query.is_empty();
+    let asset_changed = !remap_events.is_empty();
+    remap_events.clear();
 
     // Skip update if nothing changed (Performance Optimization)
-    if !any_changed && *last_count == current_count {
+    if !any_changed && *last_count == current_count && !asset_changed {
         return;
     }
     *last_count = current_count;
 
     let mut gpu_data_vec: Vec<VatInstanceData> = Vec::with_capacity(current_count);
 
-    for (index, (entity, controller)) in controller_query.iter().enumerate() {
+    for (index, (entity, controller, existing_tag)) in controller_query.iter().enumerate() {
+        let target_tag_val = index as u32;
+
+        let needs_tag_update = match existing_tag {
+            Some(tag) => tag.0 != target_tag_val,
+            None => true,
+        };
+
+        if needs_tag_update {
+            commands.entity(entity).insert(MeshTag(target_tag_val));
+        }
+
         let Some(remap_info) = remap_infos.get(&controller.remap_info) else {
             // Fill dummy data to keep index alignment if asset not ready
             gpu_data_vec.push(VatInstanceData::default());
@@ -110,8 +124,6 @@ pub fn update_instance_data(
             rate,
             offset,
         });
-
-        commands.entity(entity).insert(MeshTag(index as u32));
     }
 
     if gpu_data_vec.is_empty() {
