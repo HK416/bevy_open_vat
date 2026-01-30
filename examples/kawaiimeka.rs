@@ -60,6 +60,9 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     });
 }
 
+/// System that replaces the default `StandardMaterial` with an `ExtendedMaterial<StandardMaterial, OpenVatExtension>`.
+/// This is necessary because we need to inject the VAT texture and instance data into the shader.
+/// It waits until all required assets (VAT texture, Remap info) are loaded before performing the swap.
 fn insert_extended_materials(
     mut commands: Commands,
     asset_handles: Res<AssetHandles>,
@@ -100,8 +103,10 @@ fn insert_extended_materials(
             continue;
         };
 
+        // Check if we've already created an extended material for this original material handle.
         match material_cache.get(&old_mat.0) {
             Some(material) => {
+                // If cached, reuse the existing extended material.
                 commands.entity(entity).insert((
                     MeshMaterial3d(material.clone()),
                     VatAnimationController {
@@ -113,6 +118,7 @@ fn insert_extended_materials(
                 ));
             }
             None => {
+                // If not cached, create a new extended material with the VAT extension.
                 let extended_material = ExtendedMaterial {
                     base: std_material.clone(),
                     extension: OpenVatExtension {
@@ -122,6 +128,7 @@ fn insert_extended_materials(
                         max_pos: remap_info.os_remap.max.into(),
                         y_resolution,
                         instance: buffer_handle.clone(),
+                        ..Default::default()
                     },
                 };
 

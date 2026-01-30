@@ -2,7 +2,7 @@ use bevy::{pbr::ExtendedMaterial, prelude::*};
 
 use crate::asset::{RemapInfo, RemapInfoAssetLoader};
 use crate::material::OpenVatExtension;
-use crate::system::{update_anim_controller, update_instance_data};
+use crate::system::update_instance_data;
 
 /// Plugin that sets up the VAT material extension and animation update systems.
 pub struct OpenVatPlugin;
@@ -13,9 +13,6 @@ impl Plugin for OpenVatPlugin {
         app.init_asset::<RemapInfo>()
             .register_asset_loader(RemapInfoAssetLoader)
             .add_plugins(Plugin::default())
-            .add_systems(
-                Update,
-                (update_anim_controller, update_instance_data).chain(),
-            );
+            .add_systems(Update, update_instance_data);
     }
 }

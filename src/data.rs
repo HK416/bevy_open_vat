@@ -7,8 +7,10 @@ use crate::asset::RemapInfo;
 pub struct VatAnimationController {
     pub remap_info: Handle<RemapInfo>,
     pub current_clip: String,
-    /// Current playback time in seconds.
-    pub timer: f32,
+    /// Reference time for animation start (Global time).
+    pub start_time: f32,
+    /// Accumulated time offset (used for handling pause/resume/looping).
+    pub offset: f32,
     /// Playback speed multiplier (1.0 is normal speed).
     pub speed: f32,
     pub is_playing: bool,
@@ -19,7 +21,8 @@ impl Default for VatAnimationController {
         Self {
             remap_info: Handle::default(),
             current_clip: String::default(),
-            timer: 0.0,
+            start_time: 0.0,
+            offset: 0.0,
             speed: 1.0,
             is_playing: true,
         }
@@ -30,11 +33,19 @@ impl Default for VatAnimationController {
 #[repr(C)]
 #[derive(Debug, Clone, Copy, Reflect, ShaderType)]
 pub struct VatInstanceData {
-    pub timer: f32,
+    pub start_frame: u32,
+    pub frame_count: u32,
+    pub rate: f32,
+    pub offset: f32,
 }
 
 impl Default for VatInstanceData {
     fn default() -> Self {
-        Self { timer: 0.0 }
+        Self {
+            start_frame: 0,
+            frame_count: 1,
+            rate: 0.0,
+            offset: 0.0,
+        }
     }
 }

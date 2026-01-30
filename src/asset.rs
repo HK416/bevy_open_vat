@@ -8,6 +8,8 @@ use bevy::{
 use serde::Deserialize;
 use thiserror::Error;
 
+/// Structure representing the position remapping data from the JSON file.
+/// Used to decompress the normalized VAT texture values back into world space positions.
 #[derive(Debug, Clone, Copy, Deserialize, Reflect)]
 pub struct OsRemap {
     #[serde(rename = "Min")]
@@ -18,6 +20,7 @@ pub struct OsRemap {
     pub frames: u32,
 }
 
+/// Structure representing an animation clip defined in the JSON file.
 #[derive(Debug, Clone, Copy, Deserialize, Reflect)]
 pub struct VatAnimationClip {
     #[serde(rename = "startFrame")]
@@ -43,6 +46,8 @@ impl VatAnimationClip {
     }
 }
 
+/// Main asset structure holding remapping info and animation clips.
+/// This corresponds to the sidecar JSON file generated alongside the VAT texture.
 #[derive(Debug, Clone, Asset, Deserialize, TypePath)]
 pub struct RemapInfo {
     #[serde(rename = "os-remap")]
@@ -50,6 +55,7 @@ pub struct RemapInfo {
     pub animations: HashMap<String, VatAnimationClip>,
 }
 
+/// Asset loader for `RemapInfo` files (JSON).
 #[derive(Default, TypePath)]
 pub(crate) struct RemapInfoAssetLoader;
 

@@ -4,6 +4,8 @@
 #import bevy_pbr::mesh_functions::mesh_normal_local_to_world;
 #import bevy_pbr::view_transformations::position_world_to_clip
 #import bevy_pbr::prepass_io::{Vertex, VertexOutput};
+#import bevy_render::globals::Globals
+@group(0) @binding(1) var<uniform> globals: Globals;
 
 // --- Structures ---
 
@@ -15,8 +17,12 @@ struct OpenVatParams {
 };
 
 struct VatInstanceData {
-    timer: f32,
+    start_frame: u32,
+    frame_count: u32,
+    rate: f32,
+    offset: f32,
 };
+
 
 // --- Bindings ---
 
@@ -32,13 +38,13 @@ fn get_vat_data_safe(tag: u32) -> VatInstanceData {
     return instance_data[safe_tag];
 }
 
-fn apply_vat(time: f32, v_pos: vec3<f32>, uv_vat: vec2<f32>) -> mat2x3<f32> {
+fn apply_vat(frame_index: f32, v_pos: vec3<f32>, uv_vat: vec2<f32>) -> mat2x3<f32> {
     let frame_cnt = f32(ext.frame_count);
-    let frame_time = time % frame_cnt;
+    let safe_frame = frame_index % frame_cnt;
 
-    let current_frame = floor(frame_time);
+    let current_frame = floor(safe_frame);
     let next_frame = (current_frame + 1.0) % frame_cnt;
-    let blend = fract(frame_time);
+    let blend = fract(safe_frame);
 
     let frame_step = 1.0 / ext.y_resolution;
     let uv_curr = uv_vat + vec2<f32>(0.0, current_frame * frame_step);
@@ -60,8 +66,11 @@ fn apply_vat(time: f32, v_pos: vec3<f32>, uv_vat: vec2<f32>) -> mat2x3<f32> {
     let norm_curr_tex = textureSampleLevel(vat_texture, vat_sampler, uv_curr + vec2<f32>(0.0, 0.5), 0).rgb;
     let norm_next_tex = textureSampleLevel(vat_texture, vat_sampler, uv_next + vec2<f32>(0.0, 0.5), 0).rgb;
 
-    var n_curr = norm_curr_tex * 2.0 - 1.0; n_curr.x = -n_curr.x;
-    var n_next = norm_next_tex * 2.0 - 1.0; n_next.x = -n_next.x;
+    var n_curr = norm_curr_tex * 2.0 - 1.0;
+    var n_next = norm_next_tex * 2.0 - 1.0;
+
+    n_curr = vec3<f32>(n_curr.x, n_curr.z, -n_curr.y);
+    n_next = vec3<f32>(n_next.x, n_next.z, -n_next.y);
 
     let final_norm = normalize(mix(n_curr, n_next, blend));
 
@@ -77,7 +86,13 @@ fn main(vertex: Vertex) -> VertexOutput {
     let tag = mesh_functions::get_tag(vertex.instance_index);
     let my_data = get_vat_data_safe(tag);
 
-    let vat_result = apply_vat(my_data.timer, vertex.position, vertex.uv_b);
+    let raw_progress = globals.time * my_data.rate + my_data.offset;
+    let progress = fract(raw_progress);
+
+    let relative_frame = progress * f32(my_data.frame_count);
+    let absolute_frame = f32(my_data.start_frame) + relative_frame;
+
+    let vat_result = apply_vat(absolute_frame, vertex.position, vertex.uv_b);
     let new_position = vat_result[0];
     let new_normal = vat_result[1];
 

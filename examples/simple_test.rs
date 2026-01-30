@@ -51,6 +51,8 @@ fn setup(
     let vat_texture = create_bounce_texture(vertex_count, frame_count);
     let vat_texture_handle = images.add(vat_texture);
 
+    // Manually create RemapInfo for the procedural animation.
+    // In a real workflow, this would be loaded from a JSON file.
     let remap_info = remap_infos.add(RemapInfo {
         os_remap: OsRemap {
             min: [0.0, 0.0, 0.0],
@@ -83,6 +85,7 @@ fn setup(
             max_pos: Vec3::ONE,
             y_resolution: (frame_count * 2) as f32, // Position + Normal rows
             instance: buffers.add(ShaderStorageBuffer::default()),
+            ..Default::default()
         },
     });
 
@@ -135,12 +138,15 @@ fn setup(
 /// Generates a procedural VAT texture where vertices move in a sinusoidal "bounce".
 ///
 /// Texture Layout:
+/// - Width = Vertex Count
+/// - Height = (Frame Count * 2) + 1 (Rows for Position + Rows for Normals)
 /// - Rows 0..frame_count: Position offsets (XYZ)
 /// - Rows frame_count..frame_count*2: Normal vectors
 fn create_bounce_texture(vertex_count: u32, frame_count: u32) -> Image {
     let mut data = Vec::new();
 
     // Generate Position Data
+    // Each pixel represents the position offset for a specific vertex at a specific frame.
     for f in 0..frame_count {
         for _v in 0..vertex_count {
             let t = (f as f32 / frame_count as f32) * std::f32::consts::TAU;
@@ -156,8 +162,8 @@ fn create_bounce_texture(vertex_count: u32, frame_count: u32) -> Image {
     for _f in 0..frame_count + 1 {
         for _v in 0..vertex_count {
             data.extend_from_slice(&0.0f32.to_le_bytes());
-            data.extend_from_slice(&1.0f32.to_le_bytes());
             data.extend_from_slice(&0.0f32.to_le_bytes());
+            data.extend_from_slice(&1.0f32.to_le_bytes());
             data.extend_from_slice(&0.0f32.to_le_bytes());
         }
     }

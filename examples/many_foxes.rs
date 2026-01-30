@@ -30,7 +30,6 @@ struct Foxes {
     count: usize,
     speed: f32,
     moving: bool,
-    sync: bool,
 }
 
 fn main() {
@@ -45,7 +44,11 @@ fn main() {
             DefaultPlugins.set(WindowPlugin {
                 primary_window: Some(Window {
                     title: "🦊🦊🦊 Many Foxes! 🦊🦊🦊".into(),
-                    present_mode: PresentMode::AutoNoVsync,
+                    present_mode: if args.sync {
+                        PresentMode::AutoVsync
+                    } else {
+                        PresentMode::AutoNoVsync
+                    },
                     resolution: WindowResolution::new(1920, 1080).with_scale_factor_override(1.0),
                     ..default()
                 }),
@@ -61,7 +64,6 @@ fn main() {
             count: args.count,
             speed: 2.0,
             moving: true,
-            sync: args.sync,
         })
         .add_systems(Startup, setup)
         .add_systems(
@@ -145,8 +147,10 @@ fn setup(
 
     info!("Spawning {} foxes...", foxes.count);
 
+    // Spawn concentric rings of foxes until we reach the total count.
     while foxes_remaining > 0 {
         let (base_rotation, ring_direction) = ring_directions[ring_index % 2];
+        // Create a parent entity for the ring to simplify rotation logic.
         let ring_parent = commands
             .spawn((
                 Transform::default(),
@@ -157,6 +161,7 @@ fn setup(
             .id();
 
         let circumference = PI * 2. * radius;
+        // Calculate how many foxes fit in this ring with the desired spacing.
         let foxes_in_ring = ((circumference / FOX_SPACING) as usize).min(foxes_remaining);
         let fox_spacing_angle = circumference / (foxes_in_ring as f32 * radius);
 
@@ -264,7 +269,9 @@ fn insert_extended_materials(
 
         match material_cache.get(&old_mat.0) {
             Some(material) => {
-                commands.entity(entity).remove::<MeshMaterial3d<StandardMaterial>>();
+                commands
+                    .entity(entity)
+                    .remove::<MeshMaterial3d<StandardMaterial>>();
                 commands.entity(entity).insert((
                     MeshMaterial3d(material.clone()),
                     VatAnimationController {
@@ -275,7 +282,7 @@ fn insert_extended_materials(
                 ));
             }
             None => {
-                let mut extended_material = ExtendedMaterial {
+                let extended_material = ExtendedMaterial {
                     base: std_material.clone(),
                     extension: OpenVatExtension {
                         vat_texture: vat_texture.clone(),
@@ -284,12 +291,14 @@ fn insert_extended_materials(
                         max_pos: remap_info.os_remap.max.into(),
                         y_resolution,
                         instance: buffer_handle.clone(),
+                        ..Default::default()
                     },
                 };
-                extended_material.base.unlit = true;
 
                 let material = vat_materials.add(extended_material);
-                commands.entity(entity).remove::<MeshMaterial3d<StandardMaterial>>();
+                commands
+                    .entity(entity)
+                    .remove::<MeshMaterial3d<StandardMaterial>>();
                 commands.entity(entity).insert((
                     MeshMaterial3d(material.clone()),
                     VatAnimationController {
@@ -358,34 +367,37 @@ fn keyboard_animation_control(
             controller.speed *= 0.8;
         }
 
+        // Seek backward
         if keyboard_input.just_pressed(KeyCode::ArrowLeft) {
             if let Some(remap) = remap_infos.get(&controller.remap_info) {
                 if let Some(clip) = remap.animations.get(&controller.current_clip) {
                     let duration = clip.duration().unwrap_or(0.0);
-                    let diff = controller.timer - 0.1;
+                    let diff = controller.start_time - 0.1;
                     if diff < 0.0 {
-                        controller.timer = duration + diff;
+                        controller.start_time = duration + diff;
                     } else {
-                        controller.timer = diff;
+                        controller.start_time = diff;
                     }
                 }
             }
         }
 
+        // Seek forward
         if keyboard_input.just_pressed(KeyCode::ArrowRight) {
             if let Some(remap) = remap_infos.get(&controller.remap_info) {
                 if let Some(clip) = remap.animations.get(&controller.current_clip) {
                     let duration = clip.duration().unwrap_or(0.0);
-                    let diff = controller.timer + 0.1;
+                    let diff = controller.start_time + 0.1;
                     if diff > duration {
-                        controller.timer = diff - duration;
+                        controller.start_time = diff - duration;
                     } else {
-                        controller.timer = diff;
+                        controller.start_time = diff;
                     }
                 }
             }
         }
 
+        // Change Animation Clip
         if keyboard_input.just_pressed(KeyCode::Enter) {
             controller.current_clip = animations.keys[*current_animation].clone();
         }

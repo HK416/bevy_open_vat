@@ -9,7 +9,7 @@ const SHADER_ASSET_PATH: &str = "shaders/openvat_pbr.wgsl";
 const PREPASS_SHADER_ASSET_PATH: &str = "shaders/openvat_prepass.wgsl";
 
 /// A material extension that adds Vertex Animation Texture (VAT) support to StandardMaterial.
-#[derive(Debug, Clone, Asset, AsBindGroup, Reflect)]
+#[derive(Debug, Default, Clone, Asset, AsBindGroup, Reflect)]
 pub struct OpenVatExtension {
     /// The VAT texture containing position and normal offsets.
     #[texture(100, visibility(vertex))]

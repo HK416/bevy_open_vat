@@ -34,25 +34,25 @@ pub fn update_anim_controller(
             continue;
         };
 
-        controller.timer += dt * controller.speed;
+        controller.start_time += dt * controller.speed;
 
         let duration = clip.duration().unwrap_or(1.0);
 
         match clip.looping {
             false => {
-                if controller.timer >= duration {
-                    controller.timer = duration;
+                if controller.start_time >= duration {
+                    controller.start_time = duration;
                     controller.is_playing = false;
-                } else if controller.timer < 0.0 {
-                    controller.timer = 0.0;
+                } else if controller.start_time < 0.0 {
+                    controller.start_time = 0.0;
                     controller.is_playing = false;
                 }
             }
             true => {
-                if controller.timer >= duration {
-                    controller.timer %= duration;
-                } else if controller.timer < 0.0 {
-                    controller.timer = duration + (controller.timer % duration);
+                if controller.start_time >= duration {
+                    controller.start_time %= duration;
+                } else if controller.start_time < 0.0 {
+                    controller.start_time = duration + (controller.start_time % duration);
                 }
             }
         }
@@ -60,36 +60,57 @@ pub fn update_anim_controller(
 }
 
 /// Synchronizes the CPU-side animation state with the GPU via a storage buffer.
-/// Assigns `MeshTag`s (instance indices) to entities and uploads `VatInstanceData`.
+/// Optimized: Only rebuilds buffer when entities are added/removed or components change.
 pub fn update_instance_data(
     mut commands: Commands,
+    changed_query: Query<Entity, Changed<VatAnimationController>>,
     controller_query: Query<(Entity, &VatAnimationController)>,
     mut materials: ResMut<Assets<ExtendedMaterial<StandardMaterial, OpenVatExtension>>>,
     mat_query: Query<&MeshMaterial3d<ExtendedMaterial<StandardMaterial, OpenVatExtension>>>,
     remap_infos: Res<Assets<RemapInfo>>,
     mut buffers: ResMut<Assets<ShaderStorageBuffer>>,
+    mut last_count: Local<usize>,
 ) {
-    let mut gpu_data_vec: Vec<VatInstanceData> = Vec::with_capacity(controller_query.iter().len());
+    let current_count = controller_query.iter().len();
+    let any_changed = !changed_query.is_empty();
 
-    // Collect data for all active controllers
+    // Skip update if nothing changed (Performance Optimization)
+    if !any_changed && *last_count == current_count {
+        return;
+    }
+    *last_count = current_count;
+
+    let mut gpu_data_vec: Vec<VatInstanceData> = Vec::with_capacity(current_count);
+
     for (index, (entity, controller)) in controller_query.iter().enumerate() {
         let Some(remap_info) = remap_infos.get(&controller.remap_info) else {
-            warn!("RemapInfo asset not found for entity {:?}", entity);
+            // Fill dummy data to keep index alignment if asset not ready
+            gpu_data_vec.push(VatInstanceData::default());
+            commands.entity(entity).insert(MeshTag(index as u32));
             continue;
         };
         let Some(clip) = remap_info.animations.get(&controller.current_clip) else {
-            warn!(
-                "Animation clip '{}' not found in RemapInfo for entity {:?}",
-                controller.current_clip, entity
-            );
+            gpu_data_vec.push(VatInstanceData::default());
+            commands.entity(entity).insert(MeshTag(index as u32));
             continue;
         };
 
+        let duration = clip.duration().unwrap_or(1.0);
+        let speed = if controller.is_playing {
+            controller.speed
+        } else {
+            0.0
+        };
+        let rate = speed / duration;
+        let offset = -(controller.start_time * rate) + controller.offset;
+
         gpu_data_vec.push(VatInstanceData {
-            timer: clip.start_frame as f32 + controller.timer * clip.frame_rate,
+            start_frame: clip.start_frame,
+            frame_count: clip.end_frame - clip.start_frame,
+            rate,
+            offset,
         });
 
-        // Assign an index to the entity so the shader knows which instance data to read
         commands.entity(entity).insert(MeshTag(index as u32));
     }
 
@@ -97,7 +118,7 @@ pub fn update_instance_data(
         return;
     }
 
-    // Update the storage buffer for all materials using this extension
+    // Batch update all buffers
     for mat_handle in mat_query.iter() {
         if let Some(mat) = materials.get_mut(&mat_handle.0) {
             if let Some(buffer) = buffers.get_mut(&mat.extension.instance) {
