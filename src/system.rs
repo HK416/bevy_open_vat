@@ -39,7 +39,6 @@ pub fn auto_setup_vat_materials(
     >,
 ) {
     for (entity, animator, std_material) in query.iter() {
-        // Check if assets are ready
         let Some(image) = images.get(&animator.vat_texture) else {
             continue;
         };
@@ -104,6 +103,11 @@ pub fn auto_setup_vat_materials(
             commands.entity(entity).insert(VatMaterialReady);
         }
     }
+
+    // Clean up dead materials from the cache if their original assets have been dropped
+    material_cache.retain(|(mat_id, img_id, remap_id), _| {
+        std_materials.contains(*mat_id) && images.contains(*img_id) && remap_infos.contains(*remap_id)
+    });
 }
 
 /// 2. Update Instance Data System
@@ -121,7 +125,6 @@ pub fn update_instance_data(
         HashMap<AssetId<ExtendedMaterial<StandardMaterial, OpenVatExtension>>, usize>,
     >,
 ) {
-    // Group entities by Material ID
     let mut material_batches: HashMap<
         AssetId<ExtendedMaterial<StandardMaterial, OpenVatExtension>>,
         Vec<VatInstanceData>,
@@ -183,4 +186,7 @@ pub fn update_instance_data(
             }
         }
     }
+
+    // Phase 3: Clean up dead materials from `last_counts` to prevent memory leaks
+    last_counts.retain(|id, _| materials.contains(*id));
 }
