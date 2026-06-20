@@ -1,6 +1,6 @@
 use bevy::{
     mesh::MeshTag, pbr::ExtendedMaterial, platform::collections::HashMap, prelude::*,
-    render::storage::ShaderStorageBuffer,
+    render::storage::ShaderBuffer,
 };
 use bevy_open_vat::{data::VatInstanceData, prelude::*};
 
@@ -29,7 +29,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
 
     commands.spawn((
         DirectionalLight {
-            shadows_enabled: true,
+            shadow_maps_enabled: true,
             ..Default::default()
         },
         Transform::from_xyz(4.0, 8.0, 3.0).looking_at(Vec3::ZERO, Vec3::Y),
@@ -44,7 +44,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     for x in 0..NUM_WIDTH {
         for z in 0..NUM_DEPTH {
             commands.spawn((
-                SceneRoot(scene_handle.clone()),
+                WorldAssetRoot(scene_handle.clone()),
                 Transform::from_xyz(
                     x as f32 * SPACING - (NUM_WIDTH as f32 / 2.0) * SPACING,
                     0.0,
@@ -70,7 +70,7 @@ fn insert_extended_materials(
     remap_infos: Res<Assets<RemapInfo>>,
     std_materials: Res<Assets<StandardMaterial>>,
     mut vat_materials: ResMut<Assets<ExtendedMaterial<StandardMaterial, OpenVatExtension>>>,
-    mut buffers: ResMut<Assets<ShaderStorageBuffer>>,
+    mut buffers: ResMut<Assets<ShaderBuffer>>,
     mut entity_query: Query<(Entity, &MeshMaterial3d<StandardMaterial>)>,
 ) {
     let target_count = NUM_WIDTH * NUM_DEPTH;
@@ -92,7 +92,7 @@ fn insert_extended_materials(
     };
 
     let instance_data_vec: Vec<VatInstanceData> = Vec::with_capacity(entities.len());
-    let buffer_handle = buffers.add(ShaderStorageBuffer::from(&instance_data_vec));
+    let buffer_handle = buffers.add(ShaderBuffer::from(&instance_data_vec));
 
     let mut material_cache: HashMap<
         _,
@@ -120,7 +120,11 @@ fn insert_extended_materials(
             None => {
                 // If not cached, create a new extended material with the VAT extension.
                 let extended_material = ExtendedMaterial {
-                    base: std_material.clone(),
+                    base: StandardMaterial {
+                        // To prevent bind groups from being deleted in Prepass.
+                        alpha_mode: AlphaMode::Mask(0.0),
+                        ..std_material.clone()
+                    },
                     extension: OpenVatExtension {
                         vat_texture: vat_texture.clone(),
                         min_pos: remap_info.os_remap.min.into(),

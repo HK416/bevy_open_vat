@@ -1,7 +1,7 @@
 use bevy::{
     pbr::{ExtendedMaterial, MaterialExtension},
     prelude::*,
-    render::{render_resource::AsBindGroup, storage::ShaderStorageBuffer},
+    render::{render_resource::AsBindGroup, storage::ShaderBuffer},
     shader::ShaderRef,
 };
 
@@ -32,7 +32,7 @@ pub struct OpenVatExtension {
 
     /// Buffer storing per-instance animation data (e.g., current time).
     #[storage(103, visibility(vertex), read_only)]
-    pub instance: Handle<ShaderStorageBuffer>,
+    pub instance: Handle<ShaderBuffer>,
 }
 
 impl MaterialExtension for OpenVatExtension {

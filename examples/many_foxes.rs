@@ -7,7 +7,7 @@ use bevy::{
     pbr::ExtendedMaterial,
     platform::collections::HashMap,
     prelude::*,
-    render::storage::ShaderStorageBuffer,
+    render::storage::ShaderBuffer,
     window::{PresentMode, WindowResolution},
     winit::WinitSettings,
 };
@@ -58,7 +58,7 @@ fn main() {
             FrameTimeDiagnosticsPlugin::default(),
             LogDiagnosticsPlugin::default(),
         ))
-        .insert_resource(StaticTransformOptimizations::disabled())
+        .insert_resource(StaticTransformOptimizations::Disabled)
         .insert_resource(WinitSettings::continuous())
         .insert_resource(Foxes {
             count: args.count,
@@ -172,7 +172,7 @@ fn setup(
 
             commands.entity(ring_parent).with_children(|builder| {
                 builder.spawn((
-                    SceneRoot(fox_handle.clone()),
+                    WorldAssetRoot(fox_handle.clone()),
                     Transform::from_xyz(x, 0.0, z)
                         .with_scale(Vec3::splat(0.01))
                         .with_rotation(base_rotation * Quat::from_rotation_y(-fox_angle)),
@@ -209,7 +209,7 @@ fn setup(
     commands.spawn((
         Transform::from_rotation(Quat::from_euler(EulerRot::ZYX, 0.0, 1.0, -PI / 4.)),
         DirectionalLight {
-            shadows_enabled: true,
+            shadow_maps_enabled: true,
             ..default()
         },
         CascadeShadowConfigBuilder {
@@ -235,7 +235,7 @@ fn insert_extended_materials(
     remap_infos: Res<Assets<RemapInfo>>,
     std_materials: Res<Assets<StandardMaterial>>,
     mut vat_materials: ResMut<Assets<ExtendedMaterial<StandardMaterial, OpenVatExtension>>>,
-    mut buffers: ResMut<Assets<ShaderStorageBuffer>>,
+    mut buffers: ResMut<Assets<ShaderBuffer>>,
     mut players: Query<(Entity, &MeshMaterial3d<StandardMaterial>), Without<PlaneMarker>>,
 ) {
     let entities: Vec<_> = players.iter_mut().collect();
@@ -256,7 +256,7 @@ fn insert_extended_materials(
     };
 
     let instance_data_vec: Vec<VatInstanceData> = Vec::with_capacity(entities.len());
-    let buffer_handle = buffers.add(ShaderStorageBuffer::from(&instance_data_vec));
+    let buffer_handle = buffers.add(ShaderBuffer::from(&instance_data_vec));
 
     let mut material_cache: HashMap<
         _,
@@ -283,7 +283,11 @@ fn insert_extended_materials(
             }
             None => {
                 let extended_material = ExtendedMaterial {
-                    base: std_material.clone(),
+                    base: StandardMaterial {
+                        // To prevent bind groups from being deleted in Prepass.
+                        alpha_mode: AlphaMode::Mask(0.0),
+                        ..std_material.clone()
+                    },
                     extension: OpenVatExtension {
                         vat_texture: vat_texture.clone(),
                         min_pos: remap_info.os_remap.min.into(),

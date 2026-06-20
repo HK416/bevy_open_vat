@@ -1,5 +1,5 @@
 use bevy::{
-    mesh::MeshTag, pbr::ExtendedMaterial, prelude::*, render::storage::ShaderStorageBuffer,
+    mesh::MeshTag, pbr::ExtendedMaterial, prelude::*, render::storage::ShaderBuffer,
 };
 
 use crate::{
@@ -68,7 +68,7 @@ pub fn update_instance_data(
     mut materials: ResMut<Assets<ExtendedMaterial<StandardMaterial, OpenVatExtension>>>,
     mat_query: Query<&MeshMaterial3d<ExtendedMaterial<StandardMaterial, OpenVatExtension>>>,
     remap_infos: Res<Assets<RemapInfo>>,
-    mut buffers: ResMut<Assets<ShaderStorageBuffer>>,
+    mut buffers: ResMut<Assets<ShaderBuffer>>,
     mut remap_events: MessageReader<AssetEvent<RemapInfo>>,
     mut last_count: Local<usize>,
 ) {
@@ -133,7 +133,7 @@ pub fn update_instance_data(
     // Batch update all buffers
     for mat_handle in mat_query.iter() {
         if let Some(mat) = materials.get_mut(&mat_handle.0) {
-            if let Some(buffer) = buffers.get_mut(&mat.extension.instance) {
+            if let Some(mut buffer) = buffers.get_mut(&mat.extension.instance) {
                 buffer.set_data(gpu_data_vec.clone());
             }
         }

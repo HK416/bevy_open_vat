@@ -6,7 +6,7 @@ use bevy::{
     prelude::*,
     render::{
         render_resource::{Extent3d, TextureDimension, TextureFormat},
-        storage::ShaderStorageBuffer,
+        storage::ShaderBuffer,
     },
 };
 use bevy_open_vat::prelude::*;
@@ -23,7 +23,7 @@ fn main() {
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut buffers: ResMut<Assets<ShaderStorageBuffer>>,
+    mut buffers: ResMut<Assets<ShaderBuffer>>,
     mut remap_infos: ResMut<Assets<RemapInfo>>,
     mut vat_materials: ResMut<Assets<ExtendedMaterial<StandardMaterial, OpenVatExtension>>>,
     mut images: ResMut<Assets<Image>>,
@@ -76,6 +76,8 @@ fn setup(
             base_color: Color::srgb(1.0, 0.2, 0.2),
             double_sided: true,
             cull_mode: None,
+            // To prevent bind groups from being deleted in Prepass.
+            alpha_mode: AlphaMode::Mask(0.0),
             ..Default::default()
         },
         extension: OpenVatExtension {
@@ -84,7 +86,7 @@ fn setup(
             frame_count,
             max_pos: Vec3::ONE,
             y_resolution: (frame_count * 2) as f32, // Position + Normal rows
-            instance: buffers.add(ShaderStorageBuffer::default()),
+            instance: buffers.add(ShaderBuffer::default()),
             ..Default::default()
         },
     });
@@ -127,7 +129,7 @@ fn setup(
 
     commands.spawn((
         DirectionalLight {
-            shadows_enabled: true,
+            shadow_maps_enabled: true,
             illuminance: 10000.0,
             ..Default::default()
         },
