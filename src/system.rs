@@ -81,6 +81,8 @@ pub fn update_instance_data(
     if !any_changed && *last_count == current_count && !asset_changed {
         return;
     }
+    
+    let count_changed = *last_count != current_count;
     *last_count = current_count;
 
     let mut gpu_data_vec: Vec<VatInstanceData> = Vec::with_capacity(current_count);
@@ -131,10 +133,18 @@ pub fn update_instance_data(
     }
 
     // Batch update all buffers
+    let mut updated_buffers = std::collections::HashSet::new();
     for mat_handle in mat_query.iter() {
-        if let Some(mat) = materials.get_mut(&mat_handle.0) {
-            if let Some(mut buffer) = buffers.get_mut(&mat.extension.instance) {
-                buffer.set_data(gpu_data_vec.clone());
+        if count_changed {
+            // Force material to re-extract and rebuild bind groups ONLY when buffer resizes
+            let _ = materials.get_mut(&mat_handle.0);
+        }
+        if let Some(mat) = materials.get(&mat_handle.0) {
+            let buffer_id = mat.extension.instance.id();
+            if updated_buffers.insert(buffer_id) {
+                if let Some(mut buffer) = buffers.get_mut(&mat.extension.instance) {
+                    buffer.set_data(gpu_data_vec.clone());
+                }
             }
         }
     }

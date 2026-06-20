@@ -255,7 +255,7 @@ fn insert_extended_materials(
         return;
     };
 
-    let instance_data_vec: Vec<VatInstanceData> = Vec::with_capacity(entities.len());
+    let instance_data_vec: Vec<VatInstanceData> = vec![VatInstanceData::default(); entities.len()];
     let buffer_handle = buffers.add(ShaderBuffer::from(&instance_data_vec));
 
     let mut material_cache: HashMap<
