@@ -1,13 +1,9 @@
 use bevy::{
     asset::RenderAssetUsages,
     mesh::VertexAttributeValues,
-    pbr::ExtendedMaterial,
     platform::collections::HashMap,
     prelude::*,
-    render::{
-        render_resource::{Extent3d, TextureDimension, TextureFormat},
-        storage::ShaderBuffer,
-    },
+    render::render_resource::{Extent3d, TextureDimension, TextureFormat},
 };
 use bevy_open_vat::prelude::*;
 
@@ -15,7 +11,8 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugins(OpenVatPlugin)
-        .add_systems(Startup, setup)
+        .add_systems(Startup, (setup, setup_camera_instructions))
+        .add_systems(Update, camera_movement)
         .run();
 }
 
@@ -23,9 +20,9 @@ fn main() {
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut buffers: ResMut<Assets<ShaderBuffer>>,
     mut remap_infos: ResMut<Assets<RemapInfo>>,
-    mut vat_materials: ResMut<Assets<ExtendedMaterial<StandardMaterial, OpenVatExtension>>>,
+    mut clips: ResMut<Assets<VatAnimationClip>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
     mut images: ResMut<Assets<Image>>,
 ) {
     // Create a simple plane mesh
@@ -33,62 +30,51 @@ fn setup(
 
     // Assign unique UV1 coordinates to each vertex.
     // In VAT, UV1 is often used to index into the VAT texture's X-axis (vertex index).
+    let vertex_count = 4;
+    let frame_count = 60;
+
+    let y_uv = 0.5 / (frame_count * 2) as f32;
     plane_mesh.insert_attribute(
         Mesh::ATTRIBUTE_UV_1,
         VertexAttributeValues::Float32x2(vec![
-            [0.0 / 4.0, 0.0],
-            [1.0 / 4.0, 0.0],
-            [2.0 / 4.0, 0.0],
-            [3.0 / 4.0, 0.0],
+            [(0.0 + 0.5) / 4.0, y_uv],
+            [(1.0 + 0.5) / 4.0, y_uv],
+            [(2.0 + 0.5) / 4.0, y_uv],
+            [(3.0 + 0.5) / 4.0, y_uv],
         ]),
     );
 
     let mesh_handle = meshes.add(plane_mesh);
-    let vertex_count = 4;
-    let frame_count = 60;
 
     // Create a procedural texture that makes vertices "bounce"
     let vat_texture = create_bounce_texture(vertex_count, frame_count);
     let vat_texture_handle = images.add(vat_texture);
 
     // Manually create RemapInfo for the procedural animation.
-    // In a real workflow, this would be loaded from a JSON file.
     let remap_info = remap_infos.add(RemapInfo {
         os_remap: OsRemap {
             min: [0.0, 0.0, 0.0],
             max: [1.0, 1.0, 1.0],
             frames: frame_count,
         },
-        animations: HashMap::from_iter([(
-            "Default".to_string(),
-            VatAnimationClip {
-                start_frame: 0,
-                end_frame: frame_count,
-                frame_rate: 10.0,
-                looping: true,
-            },
-        )]),
+        animations: HashMap::new(), // Not used directly when manually constructing
     });
 
-    // Initialize the VAT material extension
-    let material = vat_materials.add(ExtendedMaterial {
-        base: StandardMaterial {
-            base_color: Color::srgb(1.0, 0.2, 0.2),
-            double_sided: true,
-            cull_mode: None,
-            // To prevent bind groups from being deleted in Prepass.
-            alpha_mode: AlphaMode::Mask(0.0),
-            ..Default::default()
-        },
-        extension: OpenVatExtension {
-            vat_texture: vat_texture_handle,
-            min_pos: Vec3::ZERO,
-            frame_count,
-            max_pos: Vec3::ONE,
-            y_resolution: (frame_count * 2) as f32, // Position + Normal rows
-            instance: buffers.add(ShaderBuffer::default()),
-            ..Default::default()
-        },
+    // Manually create a VatAnimationClip since we aren't loading from a file
+    let default_clip = clips.add(VatAnimationClip {
+        start_frame: 0,
+        end_frame: frame_count,
+        frame_rate: 10.0,
+        looping: true,
+    });
+
+    // We just create a normal StandardMaterial. The plugin will wrap it automatically!
+    let material = materials.add(StandardMaterial {
+        base_color: Color::srgb(1.0, 0.2, 0.2),
+        double_sided: true,
+        cull_mode: None,
+        alpha_mode: AlphaMode::Mask(0.0),
+        ..Default::default()
     });
 
     // Spawn a grid of entities, each with its own animation speed/offset
@@ -102,10 +88,10 @@ fn setup(
                 commands.spawn((
                     Mesh3d(mesh_handle.clone()),
                     MeshMaterial3d(material.clone()),
-                    VatAnimationController {
+                    VatAnimator {
                         remap_info: remap_info.clone(),
-                        current_clip: "Default".to_string(),
-                        // Varying speed based on position to demonstrate independent control
+                        vat_texture: vat_texture_handle.clone(),
+                        current_clip: default_clip.clone(),
                         speed: x as f32 / grid_width as f32
                             + z as f32 / grid_depth as f32
                             + i as f32 / duplicates as f32,
@@ -137,18 +123,10 @@ fn setup(
     ));
 }
 
-/// Generates a procedural VAT texture where vertices move in a sinusoidal "bounce".
-///
-/// Texture Layout:
-/// - Width = Vertex Count
-/// - Height = (Frame Count * 2) + 1 (Rows for Position + Rows for Normals)
-/// - Rows 0..frame_count: Position offsets (XYZ)
-/// - Rows frame_count..frame_count*2: Normal vectors
 fn create_bounce_texture(vertex_count: u32, frame_count: u32) -> Image {
     let mut data = Vec::new();
 
     // Generate Position Data
-    // Each pixel represents the position offset for a specific vertex at a specific frame.
     for f in 0..frame_count {
         for _v in 0..vertex_count {
             let t = (f as f32 / frame_count as f32) * std::f32::consts::TAU;
@@ -160,13 +138,16 @@ fn create_bounce_texture(vertex_count: u32, frame_count: u32) -> Image {
         }
     }
 
-    // Generate Normal Data (pointing straight up for simplicity)
+    // Generate Normal Data
+    // Normals are encoded as (n + 1.0) / 2.0 to map [-1, 1] → [0, 1]
+    // Shader decodes with: n * 2.0 - 1.0
+    // For a Z-up normal in Blender space (0, 0, 1): encoded = (0.5, 0.5, 1.0)
     for _f in 0..frame_count + 1 {
         for _v in 0..vertex_count {
-            data.extend_from_slice(&0.0f32.to_le_bytes());
-            data.extend_from_slice(&0.0f32.to_le_bytes());
-            data.extend_from_slice(&1.0f32.to_le_bytes());
-            data.extend_from_slice(&0.0f32.to_le_bytes());
+            data.extend_from_slice(&0.5f32.to_le_bytes()); // X: (0+1)/2
+            data.extend_from_slice(&0.5f32.to_le_bytes()); // Y: (0+1)/2
+            data.extend_from_slice(&1.0f32.to_le_bytes()); // Z: (1+1)/2
+            data.extend_from_slice(&0.0f32.to_le_bytes()); // W (Padding)
         }
     }
 
@@ -181,4 +162,80 @@ fn create_bounce_texture(vertex_count: u32, frame_count: u32) -> Image {
         TextureFormat::Rgba32Float,
         RenderAssetUsages::RENDER_WORLD,
     )
+}
+
+fn setup_camera_instructions(mut commands: Commands) {
+    commands.spawn((
+        Text::new(
+            "[Camera Controls]\n\
+            - W/A/S/D : Move Forward/Left/Backward/Right\n\
+            - Q / E   : Move Up / Down (Vertical)\n\
+            - Arrow Keys : Rotate Camera View\n\
+            - Shift   : Boost Movement Speed",
+        ),
+        Node {
+            position_type: PositionType::Absolute,
+            top: Val::Px(15.0),
+            left: Val::Px(15.0),
+            ..default()
+        },
+    ));
+}
+
+fn camera_movement(
+    time: Res<Time>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut query: Query<&mut Transform, With<Camera3d>>,
+) {
+    let Ok(mut transform) = query.single_mut() else {
+        return;
+    };
+
+    let mut direction = Vec3::ZERO;
+    let forward = transform.rotation * Vec3::NEG_Z;
+    let right = transform.rotation * Vec3::X;
+    let up = Vec3::Y;
+
+    if keys.pressed(KeyCode::KeyW) {
+        direction += forward;
+    }
+    if keys.pressed(KeyCode::KeyS) {
+        direction -= forward;
+    }
+    if keys.pressed(KeyCode::KeyD) {
+        direction += right;
+    }
+    if keys.pressed(KeyCode::KeyA) {
+        direction -= right;
+    }
+    if keys.pressed(KeyCode::KeyE) {
+        direction += up;
+    }
+    if keys.pressed(KeyCode::KeyQ) {
+        direction -= up;
+    }
+
+    let speed = if keys.pressed(KeyCode::ShiftLeft) {
+        50.0
+    } else {
+        25.0
+    };
+
+    if direction != Vec3::ZERO {
+        transform.translation += direction.normalize() * speed * time.delta_secs();
+    }
+
+    let rotation_speed = 1.5;
+    if keys.pressed(KeyCode::ArrowLeft) {
+        transform.rotate_y(rotation_speed * time.delta_secs());
+    }
+    if keys.pressed(KeyCode::ArrowRight) {
+        transform.rotate_y(-rotation_speed * time.delta_secs());
+    }
+    if keys.pressed(KeyCode::ArrowUp) {
+        transform.rotate_local_x(rotation_speed * time.delta_secs());
+    }
+    if keys.pressed(KeyCode::ArrowDown) {
+        transform.rotate_local_x(-rotation_speed * time.delta_secs());
+    }
 }

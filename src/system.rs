@@ -1,126 +1,162 @@
 use bevy::{
-    mesh::MeshTag, pbr::ExtendedMaterial, prelude::*, render::storage::ShaderBuffer,
+    mesh::MeshTag, pbr::ExtendedMaterial, platform::collections::HashMap, prelude::*,
+    render::storage::ShaderBuffer,
 };
 
 use crate::{
-    asset::RemapInfo,
-    data::{VatAnimationController, VatInstanceData},
+    asset::{RemapInfo, VatAnimationClip},
+    data::{VatAnimator, VatInstanceData, VatMaterialReady},
     material::OpenVatExtension,
 };
 
-/// Updates the `VatAnimationController` components, advancing their timers based on delta time and playback speed.
-/// Handles looping logic (Once vs Loop).
-pub fn update_anim_controller(
-    time: Res<Time>,
+/// 1. Auto-Setup System
+/// Automatically converts StandardMaterial to VAT ExtendedMaterial when assets are ready.
+pub fn auto_setup_vat_materials(
+    mut commands: Commands,
+    query: Query<
+        (
+            Entity,
+            &VatAnimator,
+            Option<&MeshMaterial3d<StandardMaterial>>,
+        ),
+        Without<VatMaterialReady>,
+    >,
+    children_query: Query<&Children>,
+    images: Res<Assets<Image>>,
     remap_infos: Res<Assets<RemapInfo>>,
-    mut query: Query<&mut VatAnimationController>,
+    std_materials: Res<Assets<StandardMaterial>>,
+    mut vat_materials: ResMut<Assets<ExtendedMaterial<StandardMaterial, OpenVatExtension>>>,
+    mut buffers: ResMut<Assets<ShaderBuffer>>,
+    mut material_cache: Local<
+        HashMap<
+            (
+                AssetId<StandardMaterial>,
+                AssetId<Image>,
+                AssetId<RemapInfo>,
+            ),
+            Handle<ExtendedMaterial<StandardMaterial, OpenVatExtension>>,
+        >,
+    >,
 ) {
-    let dt = time.delta_secs();
-
-    for mut controller in query.iter_mut() {
-        if !controller.is_playing {
+    for (entity, animator, std_material) in query.iter() {
+        // Check if assets are ready
+        let Some(image) = images.get(&animator.vat_texture) else {
             continue;
+        };
+        let Some(remap) = remap_infos.get(&animator.remap_info) else {
+            continue;
+        };
+
+        let y_resolution = image.texture_descriptor.size.height as f32;
+        let os_remap = &remap.os_remap;
+
+        if let Some(mat_handle) = std_material {
+            let cache_key = (
+                mat_handle.0.id(),
+                animator.vat_texture.id(),
+                animator.remap_info.id(),
+            );
+
+            let extended_mat = if let Some(cached_mat) = material_cache.get(&cache_key) {
+                cached_mat.clone()
+            } else {
+                let mut base_mat = std_materials
+                    .get(&mat_handle.0)
+                    .cloned()
+                    .unwrap_or_default();
+
+                // Workaround: In Opaque mode, prepass does not bind MaterialExtension,
+                // causing the VAT vertex shader to not work.
+                // Force the binding in prepass by setting it to Mask(0.0).
+                // (This doesn't affect the rendering result since the actual discard threshold is 0)
+                if matches!(base_mat.alpha_mode, AlphaMode::Opaque) {
+                    base_mat.alpha_mode = AlphaMode::Mask(0.0);
+                }
+
+                let buffer = buffers.add(ShaderBuffer::default());
+                let mat = vat_materials.add(ExtendedMaterial {
+                    base: base_mat,
+                    extension: OpenVatExtension {
+                        vat_texture: animator.vat_texture.clone(),
+                        min_pos: Vec3::from_array(os_remap.min),
+                        max_pos: Vec3::from_array(os_remap.max),
+                        frame_count: os_remap.frames,
+                        y_resolution,
+                        instance: buffer,
+                    },
+                });
+                material_cache.insert(cache_key, mat.clone());
+                mat
+            };
+
+            commands
+                .entity(entity)
+                .remove::<MeshMaterial3d<StandardMaterial>>()
+                .insert((MeshMaterial3d(extended_mat), VatMaterialReady, MeshTag(0)));
         }
 
-        let Some(remap_info) = remap_infos.get(&controller.remap_info) else {
-            warn!("RemapInfo asset not found for VatAnimationController");
-            continue;
-        };
-        let Some(clip) = remap_info.animations.get(&controller.current_clip) else {
-            warn!(
-                "Animation clip '{}' not found in RemapInfo",
-                controller.current_clip
-            );
-            continue;
-        };
-
-        controller.start_time += dt * controller.speed;
-
-        let duration = clip.duration().unwrap_or(1.0);
-
-        match clip.looping {
-            false => {
-                if controller.start_time >= duration {
-                    controller.start_time = duration;
-                    controller.is_playing = false;
-                } else if controller.start_time < 0.0 {
-                    controller.start_time = 0.0;
-                    controller.is_playing = false;
-                }
+        // Apply recursively to children (useful for SceneRoot)
+        if let Ok(children) = children_query.get(entity) {
+            for child in children.iter() {
+                commands.entity(child).insert(animator.clone());
             }
-            true => {
-                if controller.start_time >= duration {
-                    controller.start_time %= duration;
-                } else if controller.start_time < 0.0 {
-                    controller.start_time = duration + (controller.start_time % duration);
-                }
-            }
+            // Mark root as ready so we don't process it again
+            commands.entity(entity).insert(VatMaterialReady);
         }
     }
 }
 
-/// Synchronizes the CPU-side animation state with the GPU via a storage buffer.
-/// Optimized: Only rebuilds buffer when entities are added/removed or components change.
+/// 2. Update Instance Data System
+/// Computes current animation data and passes it to the GPU
 pub fn update_instance_data(
-    mut commands: Commands,
-    changed_query: Query<Entity, Changed<VatAnimationController>>,
-    controller_query: Query<(Entity, &VatAnimationController, Option<&MeshTag>)>,
+    mut controller_query: Query<(
+        &VatAnimator,
+        &mut MeshTag,
+        &MeshMaterial3d<ExtendedMaterial<StandardMaterial, OpenVatExtension>>,
+    )>,
+    clips: Res<Assets<VatAnimationClip>>,
     mut materials: ResMut<Assets<ExtendedMaterial<StandardMaterial, OpenVatExtension>>>,
-    mat_query: Query<&MeshMaterial3d<ExtendedMaterial<StandardMaterial, OpenVatExtension>>>,
-    remap_infos: Res<Assets<RemapInfo>>,
     mut buffers: ResMut<Assets<ShaderBuffer>>,
-    mut remap_events: MessageReader<AssetEvent<RemapInfo>>,
-    mut last_count: Local<usize>,
+    mut last_counts: Local<
+        HashMap<AssetId<ExtendedMaterial<StandardMaterial, OpenVatExtension>>, usize>,
+    >,
 ) {
-    let current_count = controller_query.iter().len();
-    let any_changed = !changed_query.is_empty();
-    let asset_changed = !remap_events.is_empty();
-    remap_events.clear();
+    // Group entities by Material ID
+    let mut material_batches: HashMap<
+        AssetId<ExtendedMaterial<StandardMaterial, OpenVatExtension>>,
+        Vec<VatInstanceData>,
+    > = HashMap::new();
 
-    // Skip update if nothing changed (Performance Optimization)
-    if !any_changed && *last_count == current_count && !asset_changed {
-        return;
-    }
-    
-    let count_changed = *last_count != current_count;
-    *last_count = current_count;
+    // Phase 1: Advance time and build GPU data grouped by material
+    for (animator, mut mesh_tag, mat_handle) in controller_query.iter_mut() {
+        let mat_id = mat_handle.0.id();
+        let batch = material_batches.entry(mat_id).or_default();
 
-    let mut gpu_data_vec: Vec<VatInstanceData> = Vec::with_capacity(current_count);
+        let index = batch.len() as u32;
 
-    for (index, (entity, controller, existing_tag)) in controller_query.iter().enumerate() {
-        let target_tag_val = index as u32;
-
-        let needs_tag_update = match existing_tag {
-            Some(tag) => tag.0 != target_tag_val,
-            None => true,
-        };
-
-        if needs_tag_update {
-            commands.entity(entity).insert(MeshTag(target_tag_val));
+        // Sync the MeshTag synchronously! No 1-frame delay.
+        if mesh_tag.0 != index {
+            mesh_tag.0 = index;
         }
 
-        let Some(remap_info) = remap_infos.get(&controller.remap_info) else {
-            // Fill dummy data to keep index alignment if asset not ready
-            gpu_data_vec.push(VatInstanceData::default());
-            commands.entity(entity).insert(MeshTag(index as u32));
-            continue;
-        };
-        let Some(clip) = remap_info.animations.get(&controller.current_clip) else {
-            gpu_data_vec.push(VatInstanceData::default());
-            commands.entity(entity).insert(MeshTag(index as u32));
+        let Some(clip) = clips.get(&animator.current_clip) else {
+            batch.push(VatInstanceData::default());
             continue;
         };
 
         let duration = clip.duration().unwrap_or(1.0);
-        let speed = if controller.is_playing {
-            controller.speed
+        let speed = if animator.is_playing {
+            animator.speed
         } else {
             0.0
         };
         let rate = speed / duration;
-        let offset = -(controller.start_time * rate) + controller.offset;
 
-        gpu_data_vec.push(VatInstanceData {
+        // Since GPU computes time using globals.time, we don't need to manually advance time on CPU.
+        // start_time is treated as a static offset.
+        let offset = -(animator.start_time * rate) + animator.offset;
+
+        batch.push(VatInstanceData {
             start_frame: clip.start_frame,
             frame_count: clip.end_frame - clip.start_frame,
             rate,
@@ -128,23 +164,22 @@ pub fn update_instance_data(
         });
     }
 
-    if gpu_data_vec.is_empty() {
-        return;
-    }
+    // Phase 2: Update buffers
+    for (mat_id, data) in material_batches {
+        let new_len = data.len();
 
-    // Batch update all buffers
-    let mut updated_buffers = std::collections::HashSet::new();
-    for mat_handle in mat_query.iter() {
-        if count_changed {
-            // Force material to re-extract and rebuild bind groups ONLY when buffer resizes
-            let _ = materials.get_mut(&mat_handle.0);
+        if let Some(mat) = materials.get(mat_id) {
+            if let Some(mut buffer) = buffers.get_mut(&mat.extension.instance) {
+                buffer.set_data(data);
+            }
         }
-        if let Some(mat) = materials.get(&mat_handle.0) {
-            let buffer_id = mat.extension.instance.id();
-            if updated_buffers.insert(buffer_id) {
-                if let Some(mut buffer) = buffers.get_mut(&mat.extension.instance) {
-                    buffer.set_data(gpu_data_vec.clone());
-                }
+
+        // 0.19 AssetMut fix: if buffer size changed, force BindGroup rebuild by touching the material.
+        let last_len = last_counts.entry(mat_id).or_insert(0);
+        if *last_len != new_len {
+            *last_len = new_len;
+            if let Some(mut mat_mut) = materials.get_mut(mat_id) {
+                let _ = &mut *mat_mut; // Explicit DerefMut triggers AssetEvent::Modified
             }
         }
     }

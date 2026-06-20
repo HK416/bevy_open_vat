@@ -1,8 +1,5 @@
-use bevy::{
-    mesh::MeshTag, pbr::ExtendedMaterial, platform::collections::HashMap, prelude::*,
-    render::storage::ShaderBuffer,
-};
-use bevy_open_vat::{data::VatInstanceData, prelude::*};
+use bevy::prelude::*;
+use bevy_open_vat::prelude::*;
 
 const NUM_WIDTH: usize = 50;
 const NUM_DEPTH: usize = 50;
@@ -12,11 +9,8 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugins(OpenVatPlugin)
-        .add_systems(Startup, setup)
-        .add_systems(
-            Update,
-            insert_extended_materials.run_if(resource_exists::<AssetHandles>),
-        )
+        .add_systems(Startup, (setup, setup_camera_instructions))
+        .add_systems(Update, camera_movement)
         .run();
 }
 
@@ -37,9 +31,14 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
 
     let scene_handle =
         asset_server.load(GltfAssetLabel::Scene(0).from_asset("models/KawaiiMeka/KawaiiMeka.glb"));
+
+    // Specify the JSON and EXR to load
     let remap_handle: Handle<RemapInfo> =
         asset_server.load("models/KawaiiMeka/KawaiiMeka-remap_info.json");
     let vat_handle: Handle<Image> = asset_server.load("models/KawaiiMeka/Collection_vat.exr");
+    // Safely load the "Idle" clip as a sub-asset
+    let idle_clip: Handle<VatAnimationClip> =
+        asset_server.load("models/KawaiiMeka/KawaiiMeka-remap_info.json#Idle");
 
     for x in 0..NUM_WIDTH {
         for z in 0..NUM_DEPTH {
@@ -50,113 +49,93 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
                     0.0,
                     z as f32 * SPACING - (NUM_DEPTH as f32 / 2.0) * SPACING,
                 ),
+                // Complete complex render pipeline configuration by adding just one component!
+                VatAnimator {
+                    remap_info: remap_handle.clone(),
+                    vat_texture: vat_handle.clone(),
+                    current_clip: idle_clip.clone(),
+                    speed: 1.0,
+                    is_playing: true,
+                    offset: 0.0,
+                    start_time: 0.0,
+                },
             ));
         }
     }
-
-    commands.insert_resource(AssetHandles {
-        remap_handle,
-        vat_handle,
-    });
 }
 
-/// System that replaces the default `StandardMaterial` with an `ExtendedMaterial<StandardMaterial, OpenVatExtension>`.
-/// This is necessary because we need to inject the VAT texture and instance data into the shader.
-/// It waits until all required assets (VAT texture, Remap info) are loaded before performing the swap.
-fn insert_extended_materials(
-    mut commands: Commands,
-    asset_handles: Res<AssetHandles>,
-    images: Res<Assets<Image>>,
-    remap_infos: Res<Assets<RemapInfo>>,
-    std_materials: Res<Assets<StandardMaterial>>,
-    mut vat_materials: ResMut<Assets<ExtendedMaterial<StandardMaterial, OpenVatExtension>>>,
-    mut buffers: ResMut<Assets<ShaderBuffer>>,
-    mut entity_query: Query<(Entity, &MeshMaterial3d<StandardMaterial>)>,
+fn setup_camera_instructions(mut commands: Commands) {
+    commands.spawn((
+        Text::new(
+            "[Camera Controls]\n\
+            - W/A/S/D : Move Forward/Left/Backward/Right\n\
+            - Q / E   : Move Up / Down (Vertical)\n\
+            - Arrow Keys : Rotate Camera View\n\
+            - Shift   : Boost Movement Speed",
+        ),
+        Node {
+            position_type: PositionType::Absolute,
+            top: Val::Px(15.0),
+            left: Val::Px(15.0),
+            ..default()
+        },
+    ));
+}
+
+fn camera_movement(
+    time: Res<Time>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut query: Query<&mut Transform, With<Camera3d>>,
 ) {
-    let target_count = NUM_WIDTH * NUM_DEPTH;
-    let entities: Vec<_> = entity_query.iter_mut().collect();
-
-    if entities.len() < target_count {
+    let Ok(mut transform) = query.single_mut() else {
         return;
+    };
+
+    let mut direction = Vec3::ZERO;
+    let forward = transform.rotation * Vec3::NEG_Z;
+    let right = transform.rotation * Vec3::X;
+    let up = Vec3::Y;
+
+    if keys.pressed(KeyCode::KeyW) {
+        direction += forward;
+    }
+    if keys.pressed(KeyCode::KeyS) {
+        direction -= forward;
+    }
+    if keys.pressed(KeyCode::KeyD) {
+        direction += right;
+    }
+    if keys.pressed(KeyCode::KeyA) {
+        direction -= right;
+    }
+    if keys.pressed(KeyCode::KeyE) {
+        direction += up;
+    }
+    if keys.pressed(KeyCode::KeyQ) {
+        direction -= up;
     }
 
-    let vat_texture = &asset_handles.vat_handle;
-    let y_resolution = if let Some(image) = images.get(vat_texture) {
-        image.texture_descriptor.size.height as f32
+    let speed = if keys.pressed(KeyCode::ShiftLeft) {
+        50.0
     } else {
-        return;
+        25.0
     };
 
-    let Some(remap_info) = remap_infos.get(&asset_handles.remap_handle) else {
-        return;
-    };
-
-    let instance_data_vec: Vec<VatInstanceData> = Vec::with_capacity(entities.len());
-    let buffer_handle = buffers.add(ShaderBuffer::from(&instance_data_vec));
-
-    let mut material_cache: HashMap<
-        _,
-        Handle<ExtendedMaterial<StandardMaterial, OpenVatExtension>>,
-    > = HashMap::default();
-    for (index, (entity, old_mat)) in entities.into_iter().enumerate() {
-        let Some(std_material) = std_materials.get(&old_mat.0) else {
-            continue;
-        };
-
-        // Check if we've already created an extended material for this original material handle.
-        match material_cache.get(&old_mat.0) {
-            Some(material) => {
-                // If cached, reuse the existing extended material.
-                commands.entity(entity).insert((
-                    MeshMaterial3d(material.clone()),
-                    VatAnimationController {
-                        remap_info: asset_handles.remap_handle.clone(),
-                        current_clip: "Idle".to_string(),
-                        ..Default::default()
-                    },
-                    MeshTag(index as u32),
-                ));
-            }
-            None => {
-                // If not cached, create a new extended material with the VAT extension.
-                let extended_material = ExtendedMaterial {
-                    base: StandardMaterial {
-                        // To prevent bind groups from being deleted in Prepass.
-                        alpha_mode: AlphaMode::Mask(0.0),
-                        ..std_material.clone()
-                    },
-                    extension: OpenVatExtension {
-                        vat_texture: vat_texture.clone(),
-                        min_pos: remap_info.os_remap.min.into(),
-                        frame_count: remap_info.os_remap.frames,
-                        max_pos: remap_info.os_remap.max.into(),
-                        y_resolution,
-                        instance: buffer_handle.clone(),
-                        ..Default::default()
-                    },
-                };
-
-                let material = vat_materials.add(extended_material);
-                commands.entity(entity).insert((
-                    MeshMaterial3d(material.clone()),
-                    VatAnimationController {
-                        remap_info: asset_handles.remap_handle.clone(),
-                        current_clip: "Idle".to_string(),
-                        ..Default::default()
-                    },
-                    MeshTag(index as u32),
-                ));
-
-                material_cache.insert(old_mat.0.clone(), material);
-            }
-        }
+    if direction != Vec3::ZERO {
+        transform.translation += direction.normalize() * speed * time.delta_secs();
     }
 
-    commands.remove_resource::<AssetHandles>();
-}
-
-#[derive(Resource)]
-struct AssetHandles {
-    remap_handle: Handle<RemapInfo>,
-    vat_handle: Handle<Image>,
+    let rotation_speed = 1.5;
+    if keys.pressed(KeyCode::ArrowLeft) {
+        transform.rotate_y(rotation_speed * time.delta_secs());
+    }
+    if keys.pressed(KeyCode::ArrowRight) {
+        transform.rotate_y(-rotation_speed * time.delta_secs());
+    }
+    if keys.pressed(KeyCode::ArrowUp) {
+        transform.rotate_local_x(rotation_speed * time.delta_secs());
+    }
+    if keys.pressed(KeyCode::ArrowDown) {
+        transform.rotate_local_x(-rotation_speed * time.delta_secs());
+    }
 }

@@ -2,7 +2,7 @@
 
 [![Crates.io](https://img.shields.io/crates/v/bevy_open_vat.svg)](https://crates.io/crates/bevy_open_vat)
 [![MIT/Apache 2.0](https://img.shields.io/badge/license-MIT%2FApache-blue.svg)](./LICENSE-MIT)
-[![Bevy](https://img.shields.io/badge/Bevy-0.18-orange)](https://bevyengine.org/)
+[![Bevy](https://img.shields.io/badge/Bevy-0.19-orange)](https://bevyengine.org/)
 
 **Bevy OpenVAT** is a high-performance Vertex Animation Texture (VAT) plugin for the Bevy game engine. It enables rendering massive amounts of animated meshes with minimal CPU overhead by offloading animation processing to the vertex shader.
 
@@ -18,15 +18,61 @@
 
 | Bevy Version | Crate Version |
 | :--- | :--- |
+| `0.19` | `0.19` |
 | `0.18` | `0.18` |
 
 Add the following to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-bevy = "0.18"
-bevy_open_vat = "0.18.0"
+bevy = "0.19"
+bevy_open_vat = "0.19.0"
 ```
+
+## Usage
+
+1. Add the `OpenVatPlugin` to your Bevy app.
+2. Load your JSON (`RemapInfo`), VAT texture (`Image`), and standard glTF models.
+3. Add the `VatAnimator` component to the entity with the mesh and `StandardMaterial`. The plugin will automatically convert the material to a VAT-enabled material.
+
+```rust
+use bevy::prelude::*;
+use bevy_open_vat::prelude::*;
+
+fn main() {
+    App::new()
+        .add_plugins((DefaultPlugins, OpenVatPlugin))
+        // ... setup systems ...
+        .run();
+}
+
+fn setup(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+) {
+    // Load assets
+    let remap_info: Handle<RemapInfo> = asset_server.load("model_remap.json");
+    let vat_texture: Handle<Image> = asset_server.load("model_vat.exr");
+    let clip: Handle<VatAnimationClip> = asset_server.load("model_remap.json#AnimationName");
+
+    // Spawn entity with VAT animator
+    commands.spawn((
+        Mesh3d(asset_server.load("model.gltf#Mesh0/Primitive0")),
+        MeshMaterial3d(asset_server.load("model.gltf#Material0")),
+        Transform::default(),
+        // Add VatAnimator to automatically convert the material
+        VatAnimator {
+            remap_info,
+            vat_texture,
+            current_clip: clip,
+            is_playing: true,
+            speed: 1.0,
+            ..default()
+        },
+    ));
+}
+```
+
 ## Asset Preparation
 
 To use this plugin, you need exported VAT assets. Typically, this includes:

@@ -4,14 +4,11 @@ use argh::FromArgs;
 use bevy::{
     diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
     light::CascadeShadowConfigBuilder,
-    pbr::ExtendedMaterial,
-    platform::collections::HashMap,
     prelude::*,
-    render::storage::ShaderBuffer,
     window::{PresentMode, WindowResolution},
     winit::WinitSettings,
 };
-use bevy_open_vat::{data::VatInstanceData, prelude::*};
+use bevy_open_vat::prelude::*;
 
 #[derive(FromArgs, Resource)]
 /// `many_foxes` stress test
@@ -65,11 +62,11 @@ fn main() {
             speed: 2.0,
             moving: true,
         })
+        .insert_resource(args)
         .add_systems(Startup, setup)
         .add_systems(
             Update,
             (
-                insert_extended_materials,
                 keyboard_animation_control,
                 update_fox_rings.after(keyboard_animation_control),
             ),
@@ -79,9 +76,7 @@ fn main() {
 
 #[derive(Resource)]
 struct Animations {
-    remap_info: Handle<RemapInfo>,
-    vat_texture: Handle<Image>,
-    keys: Vec<String>,
+    clips: Vec<Handle<VatAnimationClip>>,
 }
 
 const RING_SPACING: f32 = 2.0;
@@ -116,21 +111,21 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     foxes: Res<Foxes>,
+    args: Res<Args>,
 ) {
-    // Insert a resource with the current scene information
     let remap_info = asset_server.load("models/vat/Fox-remap_info.json");
     let vat_texture = asset_server.load("models/vat/Fox_vat.exr");
+
+    let clips = vec![
+        asset_server.load("models/vat/Fox-remap_info.json#Run"),
+        asset_server.load("models/vat/Fox-remap_info.json#Walk"),
+        asset_server.load("models/vat/Fox-remap_info.json#Survey"),
+    ];
+
     commands.insert_resource(Animations {
-        remap_info,
-        vat_texture,
-        keys: Vec::new(),
+        clips: clips.clone(),
     });
 
-    // Foxes
-    // Concentric rings of foxes, running in opposite directions. The rings are spaced at 2m radius intervals.
-    // The foxes in each ring are spaced at least 2m apart around its circumference.'
-
-    // NOTE: This fox model faces +z
     let fox_handle = asset_server.load(GltfAssetLabel::Scene(0).from_asset("models/vat/Fox.glb"));
 
     let ring_directions = [
@@ -147,10 +142,8 @@ fn setup(
 
     info!("Spawning {} foxes...", foxes.count);
 
-    // Spawn concentric rings of foxes until we reach the total count.
     while foxes_remaining > 0 {
         let (base_rotation, ring_direction) = ring_directions[ring_index % 2];
-        // Create a parent entity for the ring to simplify rotation logic.
         let ring_parent = commands
             .spawn((
                 Transform::default(),
@@ -161,7 +154,6 @@ fn setup(
             .id();
 
         let circumference = PI * 2. * radius;
-        // Calculate how many foxes fit in this ring with the desired spacing.
         let foxes_in_ring = ((circumference / FOX_SPACING) as usize).min(foxes_remaining);
         let fox_spacing_angle = circumference / (foxes_in_ring as f32 * radius);
 
@@ -176,6 +168,15 @@ fn setup(
                     Transform::from_xyz(x, 0.0, z)
                         .with_scale(Vec3::splat(0.01))
                         .with_rotation(base_rotation * Quat::from_rotation_y(-fox_angle)),
+                    VatAnimator {
+                        remap_info: remap_info.clone(),
+                        vat_texture: vat_texture.clone(),
+                        current_clip: clips[0].clone(),
+                        speed: foxes.speed,
+                        is_playing: foxes.moving,
+                        start_time: if args.sync { 0.0 } else { fox_i as f32 * 0.1 },
+                        offset: 0.0,
+                    },
                 ));
             });
         }
@@ -227,97 +228,6 @@ fn setup(
     println!("  - return: change animation");
 }
 
-fn insert_extended_materials(
-    mut commands: Commands,
-    foxes: Res<Foxes>,
-    mut animations: ResMut<Animations>,
-    images: Res<Assets<Image>>,
-    remap_infos: Res<Assets<RemapInfo>>,
-    std_materials: Res<Assets<StandardMaterial>>,
-    mut vat_materials: ResMut<Assets<ExtendedMaterial<StandardMaterial, OpenVatExtension>>>,
-    mut buffers: ResMut<Assets<ShaderBuffer>>,
-    mut players: Query<(Entity, &MeshMaterial3d<StandardMaterial>), Without<PlaneMarker>>,
-) {
-    let entities: Vec<_> = players.iter_mut().collect();
-    if entities.len() < foxes.count {
-        return;
-    }
-
-    let Some(remap_info) = remap_infos.get(&animations.remap_info) else {
-        return;
-    };
-    animations.keys = remap_info.animations.keys().cloned().collect();
-
-    let vat_texture = &animations.vat_texture;
-    let y_resolution = if let Some(image) = images.get(vat_texture) {
-        image.texture_descriptor.size.height as f32
-    } else {
-        return;
-    };
-
-    let instance_data_vec: Vec<VatInstanceData> = vec![VatInstanceData::default(); entities.len()];
-    let buffer_handle = buffers.add(ShaderBuffer::from(&instance_data_vec));
-
-    let mut material_cache: HashMap<
-        _,
-        Handle<ExtendedMaterial<StandardMaterial, OpenVatExtension>>,
-    > = HashMap::default();
-    for (entity, old_mat) in entities.into_iter() {
-        let Some(std_material) = std_materials.get(&old_mat.0) else {
-            continue;
-        };
-
-        match material_cache.get(&old_mat.0) {
-            Some(material) => {
-                commands
-                    .entity(entity)
-                    .remove::<MeshMaterial3d<StandardMaterial>>();
-                commands.entity(entity).insert((
-                    MeshMaterial3d(material.clone()),
-                    VatAnimationController {
-                        remap_info: animations.remap_info.clone(),
-                        current_clip: animations.keys[0].clone(),
-                        ..Default::default()
-                    },
-                ));
-            }
-            None => {
-                let extended_material = ExtendedMaterial {
-                    base: StandardMaterial {
-                        // To prevent bind groups from being deleted in Prepass.
-                        alpha_mode: AlphaMode::Mask(0.0),
-                        ..std_material.clone()
-                    },
-                    extension: OpenVatExtension {
-                        vat_texture: vat_texture.clone(),
-                        min_pos: remap_info.os_remap.min.into(),
-                        frame_count: remap_info.os_remap.frames,
-                        max_pos: remap_info.os_remap.max.into(),
-                        y_resolution,
-                        instance: buffer_handle.clone(),
-                        ..Default::default()
-                    },
-                };
-
-                let material = vat_materials.add(extended_material);
-                commands
-                    .entity(entity)
-                    .remove::<MeshMaterial3d<StandardMaterial>>();
-                commands.entity(entity).insert((
-                    MeshMaterial3d(material.clone()),
-                    VatAnimationController {
-                        remap_info: animations.remap_info.clone(),
-                        current_clip: animations.keys[0].clone(),
-                        ..Default::default()
-                    },
-                ));
-
-                material_cache.insert(old_mat.0.clone(), material);
-            }
-        }
-    }
-}
-
 fn update_fox_rings(
     time: Res<Time>,
     foxes: Res<Foxes>,
@@ -336,9 +246,9 @@ fn update_fox_rings(
 
 fn keyboard_animation_control(
     keyboard_input: Res<ButtonInput<KeyCode>>,
-    mut animation_player: Query<&mut VatAnimationController>,
+    mut animation_player: Query<&mut VatAnimator>,
     animations: Res<Animations>,
-    remap_infos: Res<Assets<RemapInfo>>,
+    clips: Res<Assets<VatAnimationClip>>,
     mut current_animation: Local<usize>,
     mut foxes: ResMut<Foxes>,
 ) {
@@ -355,7 +265,11 @@ fn keyboard_animation_control(
     }
 
     if keyboard_input.just_pressed(KeyCode::Enter) {
-        *current_animation = (*current_animation + 1) % animations.keys.len();
+        *current_animation = (*current_animation + 1) % animations.clips.len();
+        let new_clip = animations.clips[*current_animation].clone();
+        for mut controller in &mut animation_player {
+            controller.current_clip = new_clip.clone();
+        }
     }
 
     for mut controller in &mut animation_player {
@@ -373,37 +287,28 @@ fn keyboard_animation_control(
 
         // Seek backward
         if keyboard_input.just_pressed(KeyCode::ArrowLeft) {
-            if let Some(remap) = remap_infos.get(&controller.remap_info) {
-                if let Some(clip) = remap.animations.get(&controller.current_clip) {
-                    let duration = clip.duration().unwrap_or(0.0);
-                    let diff = controller.start_time - 0.1;
-                    if diff < 0.0 {
-                        controller.start_time = duration + diff;
-                    } else {
-                        controller.start_time = diff;
-                    }
+            if let Some(clip) = clips.get(&controller.current_clip) {
+                let duration = clip.duration().unwrap_or(0.0);
+                let diff = controller.start_time - 0.1;
+                if diff < 0.0 {
+                    controller.start_time = duration + diff;
+                } else {
+                    controller.start_time = diff;
                 }
             }
         }
 
         // Seek forward
         if keyboard_input.just_pressed(KeyCode::ArrowRight) {
-            if let Some(remap) = remap_infos.get(&controller.remap_info) {
-                if let Some(clip) = remap.animations.get(&controller.current_clip) {
-                    let duration = clip.duration().unwrap_or(0.0);
-                    let diff = controller.start_time + 0.1;
-                    if diff > duration {
-                        controller.start_time = diff - duration;
-                    } else {
-                        controller.start_time = diff;
-                    }
+            if let Some(clip) = clips.get(&controller.current_clip) {
+                let duration = clip.duration().unwrap_or(0.0);
+                let diff = controller.start_time + 0.1;
+                if diff > duration {
+                    controller.start_time = diff - duration;
+                } else {
+                    controller.start_time = diff;
                 }
             }
-        }
-
-        // Change Animation Clip
-        if keyboard_input.just_pressed(KeyCode::Enter) {
-            controller.current_clip = animations.keys[*current_animation].clone();
         }
     }
 }

@@ -21,7 +21,7 @@ pub struct OsRemap {
 }
 
 /// Structure representing an animation clip defined in the JSON file.
-#[derive(Debug, Clone, Copy, Deserialize, Reflect)]
+#[derive(Debug, Clone, Copy, Deserialize, Reflect, Asset)]
 pub struct VatAnimationClip {
     #[serde(rename = "startFrame")]
     pub start_frame: u32,
@@ -38,7 +38,7 @@ impl VatAnimationClip {
     }
 
     pub fn duration(&self) -> Option<f32> {
-        if self.frame_rate <= 1.0 {
+        if self.frame_rate <= 0.0 {
             return None;
         }
 
@@ -76,7 +76,7 @@ impl AssetLoader for RemapInfoAssetLoader {
         &self,
         reader: &mut dyn Reader,
         _settings: &Self::Settings,
-        _load_context: &mut LoadContext,
+        load_context: &mut LoadContext,
     ) -> impl ConditionalSendFuture<Output = std::result::Result<Self::Asset, Self::Error>> {
         Box::pin(async move {
             // Read the raw bytes from the asset file.
@@ -85,6 +85,11 @@ impl AssetLoader for RemapInfoAssetLoader {
 
             // Deserialize the JSON bytes into our serializable format.
             let remap_info = serde_json::from_slice::<RemapInfo>(&bytes)?;
+
+            // Register each animation clip as a sub-asset
+            for (name, clip) in &remap_info.animations {
+                load_context.add_labeled_asset(name.clone(), clip.clone());
+            }
 
             Ok(remap_info)
         })
