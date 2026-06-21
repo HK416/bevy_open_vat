@@ -87,7 +87,7 @@ To use this plugin, you need exported VAT assets. Typically, this includes:
 1. Install the **OpenVAT** plugin for Blender.
 
 ### Conversion Workflow
-![Asset Workflow Example](assets/image.png)
+![Asset Workflow Example](https://raw.githubusercontent.com/hk416/bevy_open_vat/main/assets/image.png)
 
 1.  **Load Model:** Open Blender and load the model file containing your animations.
 2.  **NLA Setup:** In the NLA (Non-Linear Animation) editor, combine the animations you want to extract into a single continuous sequence.

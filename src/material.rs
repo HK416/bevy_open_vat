@@ -7,6 +7,7 @@ use bevy::{
 
 use crate::plugin::{OPENVAT_PREPASS_SHADER_HANDLE, OPENVAT_SHADER_HANDLE};
 
+/// Type alias for the standard material extended with OpenVAT support.
 pub type VatStandardMaterial = ExtendedMaterial<StandardMaterial, OpenVatExtension>;
 
 /// A material extension that adds Vertex Animation Texture (VAT) support to StandardMaterial.

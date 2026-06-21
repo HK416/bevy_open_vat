@@ -12,10 +12,13 @@ use thiserror::Error;
 /// Used to decompress the normalized VAT texture values back into world space positions.
 #[derive(Debug, Clone, Copy, Deserialize, Reflect)]
 pub struct OsRemap {
+    /// Minimum position offset bounds for VAT geometry.
     #[serde(rename = "Min")]
     pub min: [f32; 3],
+    /// Maximum position offset bounds for VAT geometry.
     #[serde(rename = "Max")]
     pub max: [f32; 3],
+    /// Total number of frames in the VAT.
     #[serde(rename = "Frames")]
     pub frames: u32,
 }
@@ -23,20 +26,26 @@ pub struct OsRemap {
 /// Structure representing an animation clip defined in the JSON file.
 #[derive(Debug, Clone, Copy, Deserialize, Reflect, Asset)]
 pub struct VatAnimationClip {
+    /// The starting frame index of the clip.
     #[serde(rename = "startFrame")]
     pub start_frame: u32,
+    /// The ending frame index of the clip.
     #[serde(rename = "endFrame")]
     pub end_frame: u32,
+    /// The framerate (frames per second) of the clip.
     #[serde(rename = "framerate")]
     pub frame_rate: f32,
+    /// Whether the clip should loop automatically.
     pub looping: bool,
 }
 
 impl VatAnimationClip {
+    /// Gets the start time of the clip in seconds.
     pub fn start_time(&self) -> f32 {
         self.start_frame as f32 / self.frame_rate
     }
 
+    /// Gets the duration of the clip in seconds.
     pub fn duration(&self) -> Option<f32> {
         if self.frame_rate <= 0.0 {
             return None;
@@ -50,8 +59,10 @@ impl VatAnimationClip {
 /// This corresponds to the sidecar JSON file generated alongside the VAT texture.
 #[derive(Debug, Clone, Asset, Deserialize, TypePath)]
 pub struct RemapInfo {
+    /// The coordinate remapping data.
     #[serde(rename = "os-remap")]
     pub os_remap: OsRemap,
+    /// A collection of animation clips mapped by name.
     pub animations: HashMap<String, VatAnimationClip>,
 }
 
@@ -59,10 +70,13 @@ pub struct RemapInfo {
 #[derive(Default, TypePath)]
 pub(crate) struct RemapInfoAssetLoader;
 
+/// Error types for RemapInfo loader.
 #[derive(Debug, Error)]
 pub enum RemapLoaderError {
+    /// IO error during loading.
     #[error("Failed to load asset for the following reason:{0}")]
     Io(#[from] std::io::Error),
+    /// JSON parsing error during loading.
     #[error("Failed to decode asset for the following reason:{0}")]
     Json(#[from] serde_json::Error),
 }
