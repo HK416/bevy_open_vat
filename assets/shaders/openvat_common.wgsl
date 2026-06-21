@@ -26,7 +26,11 @@ struct VatInstanceData {
 // --- Utility Functions ---
 
 fn get_vat_data_safe(tag: u32) -> VatInstanceData {
-    let safe_tag = tag % arrayLength(&instance_data);
+    let len = arrayLength(&instance_data);
+    if len == 0u {
+        return VatInstanceData(0u, 1u, 0.0, 0.0);
+    }
+    let safe_tag = tag % len;
     return instance_data[safe_tag];
 }
 

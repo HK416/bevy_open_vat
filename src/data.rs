@@ -7,6 +7,11 @@ use crate::asset::{RemapInfo, VatAnimationClip};
 #[derive(Component)]
 pub struct VatMaterialReady;
 
+/// Marker component to indicate that VatAnimator has been propagated to children.
+/// Unlike VatMaterialReady, this is for entities without StandardMaterial (container nodes).
+#[derive(Component)]
+pub struct VatPropagated;
+
 /// Component to control the playback of a VAT animation on an entity.
 /// Add this to an entity to automatically convert its material to a VAT material.
 #[derive(Debug, Clone, Component, Reflect)]
