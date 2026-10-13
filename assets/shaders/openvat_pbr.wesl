@@ -4,7 +4,7 @@ import bevy_pbr::render::{
     forward_io::{Vertex, VertexOutput, decompress_vertex},
     mesh_view_bindings::globals,
 };
-import bevy_open_vat::openvat_common::{get_vat_data_safe, vat_frame, vat_normal, vat_position, vat_sample};
+import bevy_open_vat::openvat_common::{get_vat_data_safe, vat_normal, vat_position, vat_sample};
 
 // --- Vertex Shader ---
 
@@ -16,9 +16,7 @@ fn main(vertex_in: Vertex) -> VertexOutput {
     let vertex = decompress_vertex(vertex_in, vertex_in.instance_index);
 
     let tag = get_tag(vertex.instance_index);
-    let absolute_frame = vat_frame(get_vat_data_safe(tag), globals.time);
-
-    let vat = vat_sample(absolute_frame, vertex.uv_b);
+    let vat = vat_sample(get_vat_data_safe(tag), globals.time, vertex.uv_b);
     let new_position = vat_position(vat, vertex.position);
     let new_normal = vat_normal(vat);
 

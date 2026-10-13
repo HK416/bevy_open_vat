@@ -31,18 +31,7 @@ fn get_vat_data_safe(tag: u32) -> VatInstanceData {
     return instance_data[safe_tag];
 }
 
-// Absolute (fractional) VAT frame for an instance at the given shader time.
-fn vat_frame(data: VatInstanceData, time: f32) -> f32 {
-    let progress = time * data.rate + data.offset;
-    if data.looping != 0u {
-        return f32(data.start_frame) + fract(progress) * f32(data.frame_count);
-    }
-    // Hold the first or last frame instead of wrapping around.
-    let frame = f32(data.start_frame) + saturate(progress) * f32(data.frame_count);
-    return min(frame, f32(ext.frame_count - 1u));
-}
-
-// The texels to read for a fractional frame, and how far to blend between them.
+// The texels to read for an instance at the given shader time, and how far to blend between them.
 struct VatSample {
     column: i32,
     row_curr: i32,
@@ -50,15 +39,39 @@ struct VatSample {
     blend: f32,
 };
 
-fn vat_sample(frame_index: f32, uv_vat: vec2<f32>) -> VatSample {
-    let frame_cnt = f32(ext.frame_count);
-    let safe_frame = frame_index % frame_cnt;
-    let current_frame = floor(safe_frame);
-    let next_frame = (current_frame + 1.0) % frame_cnt;
+// OpenVAT clip ranges share their boundary frame with the neighbouring clip: frame `start` holds
+// the previous clip's last pose, and frame `end` repeats this clip's first pose. A clip's own
+// frames are therefore `start + 1 ..= end`, and a loop runs end -> start + 1 -> ... -> end.
+fn vat_sample(data: VatInstanceData, time: f32, uv_vat: vec2<f32>) -> VatSample {
+    let progress = time * data.rate + data.offset;
+    let count = max(data.frame_count, 1u);
+    var curr: u32;
+    var next: u32;
+    var blend: f32;
+    if data.looping != 0u {
+        let local = fract(progress) * f32(count);
+        let k = min(u32(local), count - 1u);
+        // Pose 0 is the clip's first pose, stored at `end`.
+        curr = select(data.start_frame + k, data.start_frame + count, k == 0u);
+        next = data.start_frame + k + 1u;
+        blend = fract(local);
+    } else {
+        // Play the clip's own frames once, then hold the last one.
+        let local = saturate(progress) * f32(count - 1u);
+        let k = min(u32(local), count - 1u);
+        curr = data.start_frame + 1u + k;
+        next = min(curr + 1u, data.start_frame + count);
+        blend = local - f32(k);
+    }
 
     // `uv_vat` points at this vertex's texel in frame 0; each frame is one row further down.
     let base = vec2<i32>(uv_vat * vec2<f32>(textureDimensions(vat_texture)));
-    return VatSample(base.x, base.y + i32(current_frame), base.y + i32(next_frame), fract(safe_frame));
+    return VatSample(
+        base.x,
+        base.y + i32(curr % ext.frame_count),
+        base.y + i32(next % ext.frame_count),
+        blend,
+    );
 }
 
 // Exact texel reads: no sampler, no filtering between neighboring vertices or frames.
