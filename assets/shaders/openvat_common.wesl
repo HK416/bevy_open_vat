@@ -4,7 +4,6 @@ struct OpenVatParams {
     min_pos: vec3<f32>,
     frame_count: u32,
     max_pos: vec3<f32>,
-    y_resolution: f32,
 };
 
 struct VatInstanceData {
@@ -18,7 +17,6 @@ struct VatInstanceData {
 // --- Bindings ---
 
 @group(constants::MATERIAL_BIND_GROUP) @binding(100) var vat_texture: texture_2d<f32>;
-@group(constants::MATERIAL_BIND_GROUP) @binding(101) var vat_sampler: sampler;
 @group(constants::MATERIAL_BIND_GROUP) @binding(102) var<uniform> ext: OpenVatParams;
 @group(constants::MATERIAL_BIND_GROUP) @binding(103) var<storage, read> instance_data: array<VatInstanceData>;
 
@@ -44,53 +42,54 @@ fn vat_frame(data: VatInstanceData, time: f32) -> f32 {
     return min(frame, f32(ext.frame_count - 1u));
 }
 
-fn apply_vat(frame_index: f32, v_pos: vec3<f32>, uv_vat: vec2<f32>) -> mat2x3<f32> {
+// The texels to read for a fractional frame, and how far to blend between them.
+struct VatSample {
+    column: i32,
+    row_curr: i32,
+    row_next: i32,
+    blend: f32,
+};
+
+fn vat_sample(frame_index: f32, uv_vat: vec2<f32>) -> VatSample {
     let frame_cnt = f32(ext.frame_count);
     let safe_frame = frame_index % frame_cnt;
-
     let current_frame = floor(safe_frame);
     let next_frame = (current_frame + 1.0) % frame_cnt;
-    let blend = fract(safe_frame);
 
-    let frame_step = 1.0 / ext.y_resolution;
-    let uv_curr = uv_vat + vec2<f32>(0.0, current_frame * frame_step);
-    let uv_next = uv_vat + vec2<f32>(0.0, next_frame * frame_step);
+    // `uv_vat` points at this vertex's texel in frame 0; each frame is one row further down.
+    let base = vec2<i32>(uv_vat * vec2<f32>(textureDimensions(vat_texture)));
+    return VatSample(base.x, base.y + i32(current_frame), base.y + i32(next_frame), fract(safe_frame));
+}
 
-    let pos_curr = textureSampleLevel(vat_texture, vat_sampler, uv_curr, 0).rgb;
-    let pos_next = textureSampleLevel(vat_texture, vat_sampler, uv_next, 0).rgb;
-    let pos_mixed = mix(pos_curr, pos_next, blend);
+// Exact texel reads: no sampler, no filtering between neighboring vertices or frames.
+fn vat_load(column: i32, row: i32) -> vec3<f32> {
+    return textureLoad(vat_texture, vec2<i32>(column, row), 0).rgb;
+}
 
-    let range = ext.max_pos - ext.min_pos;
-    let obj_pos = ext.min_pos + pos_mixed * range;
+// [Coordinate System Conversion]
+// Blender (Z-up Right-handed) -> Bevy (Y-up Right-handed)
+// Blender: Forward: -Y, Up: +Z, Right: +X
+// Bevy:    Forward: -Z, Up: +Y, Right: +X
+//
+// Mapping Logic:
+// Bevy.x = Blender.x
+// Bevy.y = Blender.z
+// Bevy.z = -Blender.y
+fn blender_to_bevy(v: vec3<f32>) -> vec3<f32> {
+    return vec3<f32>(v.x, v.z, -v.y);
+}
 
-    // [Coordinate System Conversion]
-    // Blender (Z-up Right-handed) -> Bevy (Y-up Right-handed)
-    // Blender: Forward: -Y, Up: +Z, Right: +X
-    // Bevy:    Forward: -Z, Up: +Y, Right: +X
-    //
-    // Mapping Logic:
-    // Bevy.x = Blender.x
-    // Bevy.y = Blender.z
-    // Bevy.z = -Blender.y
-    // 
-    let final_pos = vec3<f32>(
-        obj_pos.x,
-        ext.min_pos.z + pos_mixed.z * range.z,
-        -(ext.min_pos.y + pos_mixed.y * range.y)
-    );
+fn vat_position(s: VatSample, v_pos: vec3<f32>) -> vec3<f32> {
+    let encoded = mix(vat_load(s.column, s.row_curr), vat_load(s.column, s.row_next), s.blend);
+    let offset = ext.min_pos + encoded * (ext.max_pos - ext.min_pos);
+    return v_pos + blender_to_bevy(offset);
+}
 
-    let norm_curr_tex = textureSampleLevel(vat_texture, vat_sampler, uv_curr + vec2<f32>(0.0, 0.5), 0).rgb;
-    let norm_next_tex = textureSampleLevel(vat_texture, vat_sampler, uv_next + vec2<f32>(0.0, 0.5), 0).rgb;
-
-    var n_curr = norm_curr_tex * 2.0 - 1.0;
-    var n_next = norm_next_tex * 2.0 - 1.0;
-    
-    // Apply the same coordinate conversion to normal vectors
-    // (Swap Y <-> Z and invert Y for the new Z)
-    n_curr = vec3<f32>(n_curr.x, n_curr.z, -n_curr.y);
-    n_next = vec3<f32>(n_next.x, n_next.z, -n_next.y);
-
-    let final_norm = normalize(mix(n_curr, n_next, blend));
-
-    return mat2x3<f32>(v_pos + final_pos, final_norm);
+// Only call this when the normal is used: it costs two more texture reads.
+fn vat_normal(s: VatSample) -> vec3<f32> {
+    // Normals are stored in the lower half of the texture.
+    let half = i32(textureDimensions(vat_texture).y / 2u);
+    let n_curr = vat_load(s.column, s.row_curr + half) * 2.0 - 1.0;
+    let n_next = vat_load(s.column, s.row_next + half) * 2.0 - 1.0;
+    return blender_to_bevy(normalize(mix(n_curr, n_next, s.blend)));
 }

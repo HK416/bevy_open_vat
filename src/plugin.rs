@@ -4,7 +4,8 @@ use bevy::{pbr::ExtendedMaterial, prelude::*};
 use crate::asset::{RemapInfo, RemapInfoAssetLoader};
 use crate::material::OpenVatExtension;
 use crate::system::{
-    auto_setup_vat_materials, track_clip_finish, update_instance_data, update_vat_aabbs,
+    auto_setup_vat_materials, sync_propagated_animators, track_clip_finish, update_instance_data,
+    update_vat_aabbs,
 };
 
 /// Handle for the main OpenVAT PBR shader.
@@ -65,7 +66,12 @@ impl Plugin for OpenVatPlugin {
             // otherwise the render world sees them a frame after the matching `MeshTag` changes.
             .add_systems(
                 PostUpdate,
-                (update_instance_data.before(AssetEventSystems), track_clip_finish),
+                (
+                    (sync_propagated_animators, update_instance_data)
+                        .chain()
+                        .before(AssetEventSystems),
+                    track_clip_finish,
+                ),
             );
     }
 }

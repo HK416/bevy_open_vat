@@ -241,7 +241,8 @@ fn update_fox_rings(
 fn keyboard_animation_control(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
-    mut animation_player: Query<&mut VatAnimator>,
+    // Control the scene roots; the plugin copies their changes to the fox meshes.
+    mut animation_player: Query<&mut VatAnimator, Without<VatAnimatorOf>>,
     animations: Res<Animations>,
     mut current_animation: Local<usize>,
     mut foxes: ResMut<Foxes>,

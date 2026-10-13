@@ -16,7 +16,22 @@ pub struct VatMaterialReady;
 #[derive(Component)]
 pub struct VatPropagated;
 
+/// Links a mesh entity's `VatAnimator` copy to the animator on the entity it was propagated from.
+///
+/// Changes to the source animator are copied to every linked mesh automatically, so control
+/// playback on the source (for example the glTF scene root), not on the linked meshes.
+#[derive(Component, Debug)]
+#[relationship(relationship_target = VatAnimatedMeshes)]
+pub struct VatAnimatorOf(pub Entity);
+
+/// The mesh entities that receive copies of this entity's `VatAnimator`.
+#[derive(Component, Debug)]
+#[relationship_target(relationship = VatAnimatorOf)]
+pub struct VatAnimatedMeshes(Vec<Entity>);
+
 /// Triggered on the entity that owns a `VatAnimator` when a non-looping clip reaches its end.
+///
+/// For propagated animators it is only triggered on the source entity, not on the linked meshes.
 #[derive(EntityEvent, Debug, Clone)]
 pub struct VatClipFinished {
     /// The entity whose clip finished.
@@ -262,9 +277,10 @@ mod tests {
     }
 
     fn animator_at(seconds: f64) -> VatAnimator {
-        let mut animator = VatAnimator::default();
-        animator.anchor_time = Some(seconds);
-        animator
+        VatAnimator {
+            anchor_time: Some(seconds),
+            ..default()
+        }
     }
 
     #[test]

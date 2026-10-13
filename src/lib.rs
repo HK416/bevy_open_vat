@@ -15,7 +15,7 @@ pub mod system;
 /// Prelude module containing commonly used types and components.
 pub mod prelude {
     pub use crate::asset::{OsRemap, RemapInfo, VatAnimationClip};
-    pub use crate::data::VatAnimator;
+    pub use crate::data::{VatAnimator, VatAnimatorOf, VatClipFinished};
     pub use crate::material::OpenVatExtension;
     pub use crate::plugin::OpenVatPlugin;
 }

@@ -30,13 +30,15 @@ bevy = "0.20"
 bevy_open_vat = "0.20.0"
 ```
 
+Bevy 0.20 requires Rust 1.97.1 or newer.
+
 ## Usage
 
 1. Add the `OpenVatPlugin` to your Bevy app.
 2. Load your JSON (`RemapInfo`), VAT texture (`Image`), and standard glTF models.
 3. Add the `VatAnimator` component to the entity with the mesh and `StandardMaterial`. The plugin will automatically convert the material to a VAT-enabled material.
 
-```rust
+```rust,no_run
 use bevy::prelude::*;
 use bevy_open_vat::prelude::*;
 
@@ -59,7 +61,7 @@ fn setup(
     // Spawn entity with VAT animator
     commands.spawn((
         Mesh3d(asset_server.load("model.gltf#Mesh0/Primitive0")),
-        MeshMaterial3d(asset_server.load("model.gltf#Material0")),
+        MeshMaterial3d::<StandardMaterial>(asset_server.load("model.gltf#Material0")),
         Transform::default(),
         // Add VatAnimator to automatically convert the material
         VatAnimator::new(remap_info, vat_texture, clip),
@@ -90,6 +92,22 @@ fn control(time: Res<Time>, mut animators: Query<&mut VatAnimator>) {
 Use `VatAnimator::new(..).with_speed(1.5).with_elapsed(0.3)` to configure an animator at spawn,
 for example to desynchronize a crowd. Clips with `"looping": false` hold their last frame and
 trigger a `VatClipFinished` event on the entity when they end.
+
+### Scenes and hierarchies
+
+When `VatAnimator` is added to a parent such as a glTF scene root, the plugin copies it to every
+descendant mesh and links them with `VatAnimatorOf`. Keep controlling the parent: its changes are
+copied to the meshes automatically. To touch only the parents in a query, filter with
+`Without<VatAnimatorOf>`.
+
+### Rendering notes
+
+* **Culling:** VAT meshes get a bounding box grown by the remap offset range, so frustum culling
+  never drops a mesh whose animated pose leaves its rest-pose bounds.
+* **Vertex compression:** Meshes using Bevy's vertex attribute compression (`Mesh::compress_*`)
+  are supported, which can cut vertex bandwidth for large crowds.
+* **Texture format:** The VAT texture is read with exact texel loads, so it works with
+  non-filterable formats such as the `Rgba32Float` that EXR files load as.
 
 ## Asset Preparation
 

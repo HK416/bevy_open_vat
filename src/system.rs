@@ -13,7 +13,10 @@ use bevy::{
 
 use crate::{
     asset::{RemapInfo, VatAnimationClip},
-    data::{VatAnimator, VatClipFinished, VatInstanceData, VatMaterialReady, VatPropagated},
+    data::{
+        VatAnimatedMeshes, VatAnimator, VatAnimatorOf, VatClipFinished, VatInstanceData,
+        VatMaterialReady, VatPropagated,
+    },
     material::{OpenVatExtension, VatStandardMaterial},
 };
 
@@ -30,12 +33,18 @@ pub fn auto_setup_vat_materials(
             Entity,
             &VatAnimator,
             Option<&MeshMaterial3d<StandardMaterial>>,
+            Has<VatAnimatorOf>,
         ),
-        (Without<VatMaterialReady>, Without<VatPropagated>),
+        (
+            Without<VatMaterialReady>,
+            Without<VatPropagated>,
+            // Entities with neither can't be set up yet; filtering them here skips them
+            // without per-entity work until a material or children (e.g. a glTF scene) arrive.
+            Or<(With<MeshMaterial3d<StandardMaterial>>, With<Children>)>,
+        ),
     >,
     children_query: Query<&Children>,
     has_std_material: Query<(), With<MeshMaterial3d<StandardMaterial>>>,
-    images: Res<Assets<Image>>,
     remap_infos: Res<Assets<RemapInfo>>,
     std_materials: Res<Assets<StandardMaterial>>,
     mut vat_materials: ResMut<Assets<ExtendedMaterial<StandardMaterial, OpenVatExtension>>>,
@@ -51,15 +60,11 @@ pub fn auto_setup_vat_materials(
         >,
     >,
 ) {
-    for (entity, animator, std_material) in query.iter() {
-        let Some(image) = images.get(&animator.vat_texture) else {
-            continue;
-        };
+    for (entity, animator, std_material, is_linked) in query.iter() {
         let Some(remap) = remap_infos.get(&animator.remap_info) else {
             continue;
         };
 
-        let y_resolution = image.texture_descriptor.size.height as f32;
         let os_remap = &remap.os_remap;
 
         if let Some(mat_handle) = std_material {
@@ -85,7 +90,6 @@ pub fn auto_setup_vat_materials(
                         min_pos: Vec3::from_array(os_remap.min),
                         max_pos: Vec3::from_array(os_remap.max),
                         frame_count: os_remap.frames,
-                        y_resolution,
                         instance: buffer,
                     },
                 });
@@ -99,6 +103,11 @@ pub fn auto_setup_vat_materials(
                 .insert((MeshMaterial3d(extended_mat), VatMaterialReady, MeshTag::new(0)));
         }
 
+        // Linked meshes were already reached by their source's propagation.
+        if is_linked {
+            continue;
+        }
+
         propagate_to_descendants(
             entity,
             animator,
@@ -108,9 +117,10 @@ pub fn auto_setup_vat_materials(
         );
     }
 
-    // Clean up dead materials from the cache if their original assets have been dropped
-    material_cache.retain(|(mat_id, img_id, remap_id), _| {
-        std_materials.contains(*mat_id) && images.contains(*img_id) && remap_infos.contains(*remap_id)
+    // Clean up dead materials from the cache if their original assets have been dropped.
+    // The VAT image needs no check: cached materials hold it, and it may still be loading.
+    material_cache.retain(|(mat_id, _, remap_id), _| {
+        std_materials.contains(*mat_id) && remap_infos.contains(*remap_id)
     });
 }
 
@@ -224,6 +234,23 @@ pub fn update_vat_aabbs(
     }
 }
 
+/// Copies changes on a source `VatAnimator` to the mesh entities it was propagated to.
+pub fn sync_propagated_animators(
+    sources: Query<
+        (&VatAnimator, &VatAnimatedMeshes),
+        (Changed<VatAnimator>, Without<VatAnimatorOf>),
+    >,
+    mut meshes: Query<&mut VatAnimator, With<VatAnimatorOf>>,
+) {
+    for (animator, targets) in &sources {
+        for target in targets.iter() {
+            if let Ok(mut mesh_animator) = meshes.get_mut(target) {
+                mesh_animator.clone_from(animator);
+            }
+        }
+    }
+}
+
 /// Triggers [`VatClipFinished`] when a playing non-looping clip reaches its end.
 ///
 /// Finish times are only recomputed for animators that changed (or when clips load),
@@ -233,8 +260,8 @@ pub fn track_clip_finish(
     time: Res<Time>,
     clips: Res<Assets<VatAnimationClip>>,
     mut clip_events: MessageReader<AssetEvent<VatAnimationClip>>,
-    all: Query<(Entity, &VatAnimator)>,
-    changed: Query<(Entity, &VatAnimator), Changed<VatAnimator>>,
+    all: Query<(Entity, &VatAnimator), Without<VatAnimatorOf>>,
+    changed: Query<(Entity, &VatAnimator), (Changed<VatAnimator>, Without<VatAnimatorOf>)>,
     mut removed: RemovedComponents<VatAnimator>,
     mut pending: Local<EntityHashMap<(f64, Handle<VatAnimationClip>)>>,
 ) {
@@ -294,7 +321,9 @@ fn propagate_to_descendants(
 
     while let Some(child) = queue.pop() {
         if has_std_material.get(child).is_ok() {
-            commands.entity(child).insert(animator.clone());
+            commands
+                .entity(child)
+                .insert((animator.clone(), VatAnimatorOf(root)));
         } else {
             commands.entity(child).insert(VatPropagated);
         }
