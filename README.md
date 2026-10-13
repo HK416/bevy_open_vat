@@ -109,6 +109,22 @@ copied to the meshes automatically. To touch only the parents in a query, filter
 * **Texture format:** The VAT texture is read with exact texel loads, so it works with
   non-filterable formats such as the `Rgba32Float` that EXR files load as.
 
+### Web support
+
+On the web, only **WebGPU** is supported. Per-instance animation data is read from a storage
+buffer in the vertex shader, which WebGL2 does not have, so with Bevy's default WebGL2 backend
+VAT materials fail to build and nothing is drawn.
+
+Enable Bevy's `webgpu` feature in your app and run it in a browser with WebGPU support:
+
+```toml
+[dependencies]
+bevy = { version = "0.20", features = ["webgpu"] }
+```
+
+Bevy also requests a `.meta` file for every asset on the web; the resulting 404s are harmless,
+or you can skip the lookup with `AssetPlugin { meta_check: AssetMetaCheck::Never, ..default() }`.
+
 ## Asset Preparation
 
 To use this plugin, you need exported VAT assets. Typically, this includes:
