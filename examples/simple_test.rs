@@ -87,15 +87,16 @@ fn setup(
                 commands.spawn((
                     Mesh3d(mesh_handle.clone()),
                     MeshMaterial3d(material.clone()),
-                    VatAnimator {
-                        remap_info: remap_info.clone(),
-                        vat_texture: vat_texture_handle.clone(),
-                        current_clip: default_clip.clone(),
-                        speed: x as f32 / grid_width as f32
+                    VatAnimator::new(
+                        remap_info.clone(),
+                        vat_texture_handle.clone(),
+                        default_clip.clone(),
+                    )
+                    .with_speed(
+                        x as f32 / grid_width as f32
                             + z as f32 / grid_depth as f32
                             + i as f32 / duplicates as f32,
-                        ..Default::default()
-                    },
+                    ),
                     Transform::from_xyz(
                         x as f32 * spacing - (grid_width as f32 / 2.0) * spacing,
                         0.0,

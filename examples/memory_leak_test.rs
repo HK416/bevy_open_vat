@@ -85,11 +85,11 @@ fn spawn_and_despawn_system(
         Mesh3d(test_assets.mesh.clone()),
         MeshMaterial3d(unique_material),
         Transform::from_xyz(0.0, 0.0, 0.0),
-        VatAnimator {
-            vat_texture: test_assets.vat_texture.clone(),
-            remap_info: test_assets.remap_info.clone(),
-            ..default()
-        },
+        VatAnimator::new(
+            test_assets.remap_info.clone(),
+            test_assets.vat_texture.clone(),
+            Handle::default(),
+        ),
         DespawnTimer(Timer::from_seconds(0.5, TimerMode::Once)),
     ));
 

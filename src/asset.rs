@@ -240,8 +240,8 @@ mod tests {
 
     #[test]
     fn test_instance_data_size() {
-        // GPU expects exactly 16 bytes (4 x 4-byte fields)
-        assert_eq!(std::mem::size_of::<VatInstanceData>(), 16);
+        // GPU expects exactly 20 bytes (5 x 4-byte fields), matching the WGSL array stride
+        assert_eq!(std::mem::size_of::<VatInstanceData>(), 20);
     }
 
     #[test]
@@ -257,6 +257,7 @@ mod tests {
             frame_count: 50,
             rate: 1.5,
             offset: -0.3,
+            looping: 1,
         };
         assert_eq!(d.start_frame, 10);
         assert_eq!(d.frame_count, 50);
@@ -271,6 +272,7 @@ mod tests {
             frame_count: 0,
             rate: 1.0,
             offset: 0.0,
+            looping: 1,
         };
         assert_eq!(d.frame_count, 0);
     }
@@ -282,6 +284,7 @@ mod tests {
             frame_count: u32::MAX,
             rate: f32::MAX,
             offset: f32::MIN,
+            looping: 0,
         };
         assert_eq!(d.start_frame, u32::MAX);
         assert_eq!(d.frame_count, u32::MAX);

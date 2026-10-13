@@ -1,12 +1,12 @@
 use bevy::{
-    mesh::MeshTag, pbr::ExtendedMaterial, platform::collections::HashMap, prelude::*,
-    render::storage::ShaderBuffer,
+    ecs::entity::EntityHashMap, mesh::MeshTag, pbr::ExtendedMaterial,
+    platform::collections::HashMap, prelude::*, render::storage::ShaderBuffer,
 };
 
 use crate::{
     asset::{RemapInfo, VatAnimationClip},
-    data::{VatAnimator, VatInstanceData, VatMaterialReady, VatPropagated},
-    material::OpenVatExtension,
+    data::{VatAnimator, VatClipFinished, VatInstanceData, VatMaterialReady, VatPropagated},
+    material::{OpenVatExtension, VatStandardMaterial},
 };
 
 /// Automatically sets up VAT materials for entities with a `VatAnimator`.
@@ -108,65 +108,72 @@ pub fn auto_setup_vat_materials(
 
 /// Updates the animation state for all active VAT instances and syncs data to the GPU.
 ///
-/// This system calculates the current frame, rate, and offset for each `VatAnimator`,
-/// batches the instance data by material, and updates the corresponding `ShaderBuffer`.
-/// It also assigns deterministic `MeshTag` indices to ensure stable rendering.
+/// Animation time advances on the GPU, so this only does work when an animator, its material,
+/// or a clip changed, an instance was removed, or the shader's wrapped time rolled over.
+/// It batches the instance data by material, updates the corresponding `ShaderBuffer`,
+/// and assigns deterministic `MeshTag` indices to ensure stable rendering.
+#[allow(clippy::too_many_arguments)]
 pub fn update_instance_data(
     mut controller_query: Query<(
         Entity,
         &VatAnimator,
         &mut MeshTag,
-        &MeshMaterial3d<ExtendedMaterial<StandardMaterial, OpenVatExtension>>,
+        &MeshMaterial3d<VatStandardMaterial>,
     )>,
+    changed: Query<
+        (),
+        (
+            With<MeshTag>,
+            Or<(
+                Changed<VatAnimator>,
+                Changed<MeshMaterial3d<VatStandardMaterial>>,
+            )>,
+        ),
+    >,
+    mut removed_animators: RemovedComponents<VatAnimator>,
+    mut removed_materials: RemovedComponents<MeshMaterial3d<VatStandardMaterial>>,
+    mut clip_events: MessageReader<AssetEvent<VatAnimationClip>>,
+    time: Res<Time>,
+    mut last_wrap_base: Local<f64>,
     clips: Res<Assets<VatAnimationClip>>,
-    materials: Res<Assets<ExtendedMaterial<StandardMaterial, OpenVatExtension>>>,
+    materials: Res<Assets<VatStandardMaterial>>,
     mut buffers: ResMut<Assets<ShaderBuffer>>,
 ) {
+    let wrap_base = time.elapsed_secs_f64() - time.elapsed_secs_wrapped_f64();
+    let time_wrapped = wrap_base != *last_wrap_base;
+    *last_wrap_base = wrap_base;
+    // Drain every reader each frame, even when another check already marked us dirty.
+    let removed = removed_animators.read().count() + removed_materials.read().count() > 0;
+    let clips_changed = clip_events.read().count() > 0;
+    if changed.is_empty() && !removed && !clips_changed && !time_wrapped {
+        return;
+    }
+
     let mut sorted_entities: Vec<_> = controller_query.iter_mut().collect();
     sorted_entities.sort_by_key(|(entity, _, _, _)| *entity);
 
-    let mut material_batches: HashMap<
-        AssetId<ExtendedMaterial<StandardMaterial, OpenVatExtension>>,
-        Vec<VatInstanceData>,
-    > = HashMap::new();
+    let mut material_batches: HashMap<AssetId<VatStandardMaterial>, Vec<VatInstanceData>> =
+        HashMap::new();
 
     // Build GPU data grouped by material in a deterministic order
     for (_, animator, mut mesh_tag, mat_handle) in sorted_entities.into_iter() {
-        let mat_id = mat_handle.0.id();
-        let batch = material_batches.entry(mat_id).or_default();
+        let batch = material_batches.entry(mat_handle.0.id()).or_default();
 
         let index = batch.len() as u32;
-
         if mesh_tag.value != index {
             mesh_tag.value = index;
         }
 
-        let Some(clip) = clips.get(&animator.current_clip) else {
-            batch.push(VatInstanceData::default());
-            continue;
-        };
-
-        let duration = clip.duration().unwrap_or(1.0);
-        let duration = if duration <= 0.0 { 1.0 } else { duration };
-        let speed = if animator.is_playing {
-            animator.speed
-        } else {
-            0.0
-        };
-        let rate = speed / duration;
-
-        let offset = -(animator.start_time * rate) + animator.offset;
-
-        batch.push(VatInstanceData {
-            start_frame: clip.start_frame,
-            frame_count: clip.frame_count(),
-            rate,
-            offset,
-        });
+        batch.push(
+            clips
+                .get(animator.current_clip())
+                .map(|clip| animator.instance_data(clip, wrap_base))
+                .unwrap_or_default(),
+        );
     }
 
     // Sync every VAT material's buffer; materials with no active instances get a single default entry.
-    // Animation time advances on the GPU, so buffers are only written when their contents change.
+    // Buffers are only written when their contents change.
     // Bevy rebuilds the material bind group by itself when a buffer is reallocated.
     let idle = [VatInstanceData::default()];
     for (mat_id, mat) in materials.iter() {
@@ -180,6 +187,50 @@ pub fn update_instance_data(
             buffer.extend_from_slice(data);
         }
     }
+}
+
+/// Triggers [`VatClipFinished`] when a playing non-looping clip reaches its end.
+///
+/// Finish times are only recomputed for animators that changed (or when clips load),
+/// so idle frames just check the pending deadlines.
+pub fn track_clip_finish(
+    mut commands: Commands,
+    time: Res<Time>,
+    clips: Res<Assets<VatAnimationClip>>,
+    mut clip_events: MessageReader<AssetEvent<VatAnimationClip>>,
+    all: Query<(Entity, &VatAnimator)>,
+    changed: Query<(Entity, &VatAnimator), Changed<VatAnimator>>,
+    mut removed: RemovedComponents<VatAnimator>,
+    mut pending: Local<EntityHashMap<(f64, Handle<VatAnimationClip>)>>,
+) {
+    for entity in removed.read() {
+        pending.remove(&entity);
+    }
+
+    let mut schedule = |(entity, animator): (Entity, &VatAnimator)| {
+        let clip = animator.current_clip();
+        match clips.get(clip).and_then(|c| animator.finish_time(c)) {
+            Some(at) => pending.insert(entity, (at, clip.clone())),
+            None => pending.remove(&entity),
+        };
+    };
+    if clip_events.read().count() > 0 {
+        all.iter().for_each(&mut schedule);
+    } else {
+        changed.iter().for_each(&mut schedule);
+    }
+
+    let now = time.elapsed_secs_f64();
+    pending.retain(|&entity, (at, clip)| {
+        if *at > now {
+            return true;
+        }
+        commands.trigger(VatClipFinished {
+            entity,
+            clip: clip.clone(),
+        });
+        false
+    });
 }
 
 /// Returns `true` if `buffer` does not already hold exactly `data`.

@@ -12,6 +12,7 @@ struct VatInstanceData {
     frame_count: u32,
     rate: f32,
     offset: f32,
+    looping: u32,
 };
 
 // --- Bindings ---
@@ -26,10 +27,21 @@ struct VatInstanceData {
 fn get_vat_data_safe(tag: u32) -> VatInstanceData {
     let len = arrayLength(&instance_data);
     if len == 0u {
-        return VatInstanceData(0u, 1u, 0.0, 0.0);
+        return VatInstanceData(0u, 1u, 0.0, 0.0, 1u);
     }
     let safe_tag = tag % len;
     return instance_data[safe_tag];
+}
+
+// Absolute (fractional) VAT frame for an instance at the given shader time.
+fn vat_frame(data: VatInstanceData, time: f32) -> f32 {
+    let progress = time * data.rate + data.offset;
+    if data.looping != 0u {
+        return f32(data.start_frame) + fract(progress) * f32(data.frame_count);
+    }
+    // Hold the first or last frame instead of wrapping around.
+    let frame = f32(data.start_frame) + saturate(progress) * f32(data.frame_count);
+    return min(frame, f32(ext.frame_count - 1u));
 }
 
 fn apply_vat(frame_index: f32, v_pos: vec3<f32>, uv_vat: vec2<f32>) -> mat2x3<f32> {

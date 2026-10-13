@@ -4,7 +4,7 @@ import bevy_pbr::render::{
     forward_io::{Vertex, VertexOutput, decompress_vertex},
     mesh_view_bindings::globals,
 };
-import bevy_open_vat::openvat_common::{apply_vat, get_vat_data_safe};
+import bevy_open_vat::openvat_common::{apply_vat, get_vat_data_safe, vat_frame};
 
 // --- Vertex Shader ---
 
@@ -16,13 +16,7 @@ fn main(vertex_in: Vertex) -> VertexOutput {
     let vertex = decompress_vertex(vertex_in, vertex_in.instance_index);
 
     let tag = get_tag(vertex.instance_index);
-    let my_data = get_vat_data_safe(tag);
-    
-    let raw_progress = globals.time * my_data.rate + my_data.offset;
-    let progress = fract(raw_progress);
-
-    let relative_frame = progress * f32(my_data.frame_count);
-    let absolute_frame = f32(my_data.start_frame) + relative_frame;
+    let absolute_frame = vat_frame(get_vat_data_safe(tag), globals.time);
 
     let vat_result = apply_vat(absolute_frame, vertex.position, vertex.uv_b);
     let new_position = vat_result[0];

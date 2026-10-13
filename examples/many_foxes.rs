@@ -168,15 +168,9 @@ fn setup(
                     Transform::from_xyz(x, 0.0, z)
                         .with_scale(Vec3::splat(0.01))
                         .with_rotation(base_rotation * Quat::from_rotation_y(-fox_angle)),
-                    VatAnimator {
-                        remap_info: remap_info.clone(),
-                        vat_texture: vat_texture.clone(),
-                        current_clip: clips[0].clone(),
-                        speed: foxes.speed,
-                        is_playing: foxes.moving,
-                        start_time: if args.sync { 0.0 } else { fox_i as f32 * 0.1 },
-                        offset: 0.0,
-                    },
+                    VatAnimator::new(remap_info.clone(), vat_texture.clone(), clips[0].clone())
+                        .with_speed(foxes.speed)
+                        .with_elapsed(if args.sync { 0.0 } else { fox_i as f32 * 0.1 }),
                 ));
             });
         }
@@ -246,9 +240,9 @@ fn update_fox_rings(
 
 fn keyboard_animation_control(
     keyboard_input: Res<ButtonInput<KeyCode>>,
+    time: Res<Time>,
     mut animation_player: Query<&mut VatAnimator>,
     animations: Res<Animations>,
-    clips: Res<Assets<VatAnimationClip>>,
     mut current_animation: Local<usize>,
     mut foxes: ResMut<Foxes>,
 ) {
@@ -264,51 +258,43 @@ fn keyboard_animation_control(
         foxes.speed *= 0.8;
     }
 
-    if keyboard_input.just_pressed(KeyCode::Enter) {
+    let new_clip = keyboard_input.just_pressed(KeyCode::Enter).then(|| {
         *current_animation = (*current_animation + 1) % animations.clips.len();
-        let new_clip = animations.clips[*current_animation].clone();
-        for mut controller in &mut animation_player {
-            controller.current_clip = new_clip.clone();
-        }
-    }
+        animations.clips[*current_animation].clone()
+    });
 
     for mut controller in &mut animation_player {
+        if let Some(clip) = &new_clip {
+            controller.play(clip.clone(), &time);
+        }
+
         if keyboard_input.just_pressed(KeyCode::Space) {
-            controller.is_playing = !controller.is_playing;
+            if controller.is_playing() {
+                controller.pause(&time);
+            } else {
+                controller.resume(&time);
+            }
         }
 
         if keyboard_input.just_pressed(KeyCode::ArrowUp) {
-            controller.speed *= 1.25;
+            let speed = controller.speed() * 1.25;
+            controller.set_speed(speed, &time);
         }
 
         if keyboard_input.just_pressed(KeyCode::ArrowDown) {
-            controller.speed *= 0.8;
+            let speed = controller.speed() * 0.8;
+            controller.set_speed(speed, &time);
         }
 
-        // Seek backward
+        // Seek backward / forward
         if keyboard_input.just_pressed(KeyCode::ArrowLeft) {
-            if let Some(clip) = clips.get(&controller.current_clip) {
-                let duration = clip.duration().unwrap_or(0.0);
-                let diff = controller.start_time - 0.1;
-                if diff < 0.0 {
-                    controller.start_time = duration + diff;
-                } else {
-                    controller.start_time = diff;
-                }
-            }
+            let elapsed = controller.elapsed(&time);
+            controller.seek(elapsed - 0.1, &time);
         }
 
-        // Seek forward
         if keyboard_input.just_pressed(KeyCode::ArrowRight) {
-            if let Some(clip) = clips.get(&controller.current_clip) {
-                let duration = clip.duration().unwrap_or(0.0);
-                let diff = controller.start_time + 0.1;
-                if diff > duration {
-                    controller.start_time = diff - duration;
-                } else {
-                    controller.start_time = diff;
-                }
-            }
+            let elapsed = controller.elapsed(&time);
+            controller.seek(elapsed + 0.1, &time);
         }
     }
 }

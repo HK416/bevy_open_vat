@@ -12,7 +12,7 @@
 - **High Performance Instancing:** Uses `StorageBuffers` to render thousands of animated entities with few draw calls.
 - **Smooth Interpolation:** Supports frame blending for fluid animation playback.
 - **PBR Compatible:** Built on top of Bevy's `StandardMaterial`, fully supporting lighting, shadows, and depth pre-pass.
-- **Flexible Control:** Per-entity control over playback speed, looping, and time offsets.
+- **Flexible Control:** Per-entity play, pause, seek, and speed control without animation pops, plus one-shot clips with a `VatClipFinished` event.
 
 ## Installation
 
@@ -62,17 +62,34 @@ fn setup(
         MeshMaterial3d(asset_server.load("model.gltf#Material0")),
         Transform::default(),
         // Add VatAnimator to automatically convert the material
-        VatAnimator {
-            remap_info,
-            vat_texture,
-            current_clip: clip,
-            is_playing: true,
-            speed: 1.0,
-            ..default()
-        },
+        VatAnimator::new(remap_info, vat_texture, clip),
     ));
 }
 ```
+
+### Playback control
+
+Animation time advances on the GPU, so change playback through the `VatAnimator` methods.
+They re-anchor at the current time, so the animation continues from where it is instead of jumping.
+
+```rust
+use bevy::prelude::*;
+use bevy_open_vat::prelude::*;
+
+fn control(time: Res<Time>, mut animators: Query<&mut VatAnimator>) {
+    for mut animator in &mut animators {
+        animator.pause(&time);                // hold the current frame
+        animator.resume(&time);
+        animator.set_speed(2.0, &time);       // negative values play backwards
+        animator.seek(0.5, &time);            // seconds into the clip
+        // animator.play(other_clip.clone(), &time); // switch clips and restart
+    }
+}
+```
+
+Use `VatAnimator::new(..).with_speed(1.5).with_elapsed(0.3)` to configure an animator at spawn,
+for example to desynchronize a crowd. Clips with `"looping": false` hold their last frame and
+trigger a `VatClipFinished` event on the entity when they end.
 
 ## Asset Preparation
 

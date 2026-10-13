@@ -50,15 +50,7 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
                     z as f32 * SPACING - (NUM_DEPTH as f32 / 2.0) * SPACING,
                 ),
                 // Complete complex render pipeline configuration by adding just one component!
-                VatAnimator {
-                    remap_info: remap_handle.clone(),
-                    vat_texture: vat_handle.clone(),
-                    current_clip: idle_clip.clone(),
-                    speed: 1.0,
-                    is_playing: true,
-                    offset: 0.0,
-                    start_time: 0.0,
-                },
+                VatAnimator::new(remap_handle.clone(), vat_handle.clone(), idle_clip.clone()),
             ));
         }
     }

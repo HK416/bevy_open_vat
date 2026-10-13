@@ -3,7 +3,7 @@ use bevy::{pbr::ExtendedMaterial, prelude::*};
 
 use crate::asset::{RemapInfo, RemapInfoAssetLoader};
 use crate::material::OpenVatExtension;
-use crate::system::{auto_setup_vat_materials, update_instance_data};
+use crate::system::{auto_setup_vat_materials, track_clip_finish, update_instance_data};
 
 /// Handle for the main OpenVAT PBR shader.
 pub const OPENVAT_SHADER_HANDLE: Handle<Shader> =
@@ -58,6 +58,9 @@ impl Plugin for OpenVatPlugin {
             .add_systems(Update, auto_setup_vat_materials)
             // Buffer writes must land before this frame's asset events are flushed,
             // otherwise the render world sees them a frame after the matching `MeshTag` changes.
-            .add_systems(PostUpdate, update_instance_data.before(AssetEventSystems));
+            .add_systems(
+                PostUpdate,
+                (update_instance_data.before(AssetEventSystems), track_clip_finish),
+            );
     }
 }
