@@ -1,26 +1,19 @@
 import bevy_pbr::render::{
     mesh_functions::{get_tag, get_world_from_local, mesh_position_local_to_world, mesh_normal_local_to_world},
     view_transformations::position_world_to_clip,
-    forward_io::VertexOutput,
+    forward_io::{Vertex, VertexOutput, decompress_vertex},
     mesh_view_bindings::globals,
 };
 import bevy_open_vat::openvat_common::{apply_vat, get_vat_data_safe};
 
-// --- Structures ---
-
-struct Vertex {
-    @builtin(instance_index) instance_index: u32,
-    @location(0) position: vec3<f32>,
-    @location(1) normal: vec3<f32>,
-    @location(2) uv: vec2<f32>,
-    @location(3) uv_b: vec2<f32>,
-}
-
 // --- Vertex Shader ---
 
 @vertex
-fn main(vertex: Vertex) -> VertexOutput {
+fn main(vertex_in: Vertex) -> VertexOutput {
     var out: VertexOutput;
+
+    // Handles meshes with compressed vertex attributes (`Mesh::compress_*`)
+    let vertex = decompress_vertex(vertex_in, vertex_in.instance_index);
 
     let tag = get_tag(vertex.instance_index);
     let my_data = get_vat_data_safe(tag);
@@ -46,7 +39,11 @@ fn main(vertex: Vertex) -> VertexOutput {
     // World -> Clip
     out.position = position_world_to_clip(out.world_position.xyz);
     
+    @if(VERTEX_UVS_A)
     out.uv = vertex.uv;
-    
+
+    @if(VERTEX_UVS_B)
+    out.uv_b = vertex.uv_b;
+
     return out;
 }

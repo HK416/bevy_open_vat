@@ -3,7 +3,7 @@ import bevy_pbr::{
         mesh_functions::{get_tag, get_world_from_local, mesh_position_local_to_world, mesh_normal_local_to_world},
         view_transformations::position_world_to_clip,
     },
-    prepass::io::{Vertex, VertexOutput},
+    prepass::io::{Vertex, VertexOutput, decompress_vertex},
 };
 import bevy_render::globals::Globals;
 import bevy_open_vat::openvat_common::{apply_vat, get_vat_data_safe};
@@ -16,8 +16,11 @@ import bevy_open_vat::openvat_common::{apply_vat, get_vat_data_safe};
 // --- Vertex Shader ---
 
 @vertex
-fn main(vertex: Vertex) -> VertexOutput {
+fn main(vertex_in: Vertex) -> VertexOutput {
     var out: VertexOutput;
+
+    // Handles meshes with compressed vertex attributes (`Mesh::compress_*`)
+    let vertex = decompress_vertex(vertex_in, vertex_in.instance_index);
 
     let tag = get_tag(vertex.instance_index);
     let my_data = get_vat_data_safe(tag);
