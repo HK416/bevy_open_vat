@@ -1,6 +1,14 @@
 use bevy::{
-    ecs::entity::EntityHashMap, mesh::MeshTag, pbr::ExtendedMaterial,
-    platform::collections::HashMap, prelude::*, render::storage::ShaderBuffer,
+    camera::{
+        primitives::{Aabb, MeshAabb},
+        visibility::NoAutoAabb,
+    },
+    ecs::entity::EntityHashMap,
+    mesh::MeshTag,
+    pbr::ExtendedMaterial,
+    platform::collections::HashMap,
+    prelude::*,
+    render::storage::ShaderBuffer,
 };
 
 use crate::{
@@ -186,6 +194,33 @@ pub fn update_instance_data(
             buffer.clear();
             buffer.extend_from_slice(data);
         }
+    }
+}
+
+/// Gives VAT meshes a bounding box that covers every animated pose.
+///
+/// Bevy computes the AABB from the rest pose, so frustum culling could drop meshes whose
+/// animation moves vertices outside it. The rest bounds are grown by the VAT offset range,
+/// and `NoAutoAabb` keeps Bevy from recomputing them.
+pub fn update_vat_aabbs(
+    mut commands: Commands,
+    meshes: Res<Assets<Mesh>>,
+    remap_infos: Res<Assets<RemapInfo>>,
+    query: Query<(Entity, &Mesh3d, &VatAnimator), (With<VatMaterialReady>, Without<NoAutoAabb>)>,
+) {
+    for (entity, mesh, animator) in &query {
+        let Some(rest) = meshes.get(mesh).and_then(|mesh| mesh.get_aabb()) else {
+            continue;
+        };
+        let Some(remap) = remap_infos.get(&animator.remap_info) else {
+            continue;
+        };
+        let (offset_min, offset_max) = remap.os_remap.offset_bounds();
+        let aabb = Aabb::from_min_max(
+            Vec3::from(rest.min()) + offset_min,
+            Vec3::from(rest.max()) + offset_max,
+        );
+        commands.entity(entity).insert((aabb, NoAutoAabb));
     }
 }
 

@@ -23,6 +23,19 @@ pub struct OsRemap {
     pub frames: u32,
 }
 
+impl OsRemap {
+    /// Range of the per-vertex VAT offsets in Bevy's Y-up space, as `(min, max)`.
+    ///
+    /// Mirrors the Blender (Z-up) to Bevy (Y-up) conversion in the shader: `(x, y, z) -> (x, z, -y)`.
+    pub fn offset_bounds(&self) -> (Vec3, Vec3) {
+        let (min, max) = (self.min, self.max);
+        (
+            Vec3::new(min[0], min[2], -max[1]),
+            Vec3::new(max[0], max[2], -min[1]),
+        )
+    }
+}
+
 /// Structure representing an animation clip defined in the JSON file.
 #[derive(Debug, Clone, Copy, Deserialize, Reflect, Asset)]
 pub struct VatAnimationClip {
@@ -293,6 +306,18 @@ mod tests {
     // ========================================
     // OsRemap 테스트
     // ========================================
+
+    #[test]
+    fn test_os_remap_offset_bounds() {
+        let remap = OsRemap {
+            min: [-1.0, -2.0, -3.0],
+            max: [4.0, 5.0, 6.0],
+            frames: 1,
+        };
+        let (min, max) = remap.offset_bounds();
+        assert_eq!(min, Vec3::new(-1.0, -3.0, -5.0));
+        assert_eq!(max, Vec3::new(4.0, 6.0, 2.0));
+    }
 
     #[test]
     fn test_os_remap_default_values() {
