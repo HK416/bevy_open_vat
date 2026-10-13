@@ -73,7 +73,6 @@ fn setup(
         base_color: Color::srgb(1.0, 0.2, 0.2),
         double_sided: true,
         cull_mode: None,
-        alpha_mode: AlphaMode::Mask(0.0),
         ..Default::default()
     });
 

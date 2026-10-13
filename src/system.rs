@@ -64,18 +64,10 @@ pub fn auto_setup_vat_materials(
             let extended_mat = if let Some(cached_mat) = material_cache.get(&cache_key) {
                 cached_mat.clone()
             } else {
-                let mut base_mat = std_materials
+                let base_mat = std_materials
                     .get(&mat_handle.0)
                     .cloned()
                     .unwrap_or_default();
-
-                // Workaround: In Opaque mode, prepass does not bind MaterialExtension,
-                // causing the VAT vertex shader to not work.
-                // Force the binding in prepass by setting it to Mask(0.0).
-                // (This doesn't affect the rendering result since the actual discard threshold is 0)
-                if matches!(base_mat.alpha_mode, AlphaMode::Opaque) {
-                    base_mat.alpha_mode = AlphaMode::Mask(0.0);
-                }
 
                 let buffer = buffers.add(ShaderBuffer::from(vec![VatInstanceData::default()]));
                 let mat = vat_materials.add(ExtendedMaterial {
