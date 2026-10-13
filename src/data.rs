@@ -49,7 +49,7 @@ impl Default for VatAnimator {
 
 /// Data sent to the GPU for each instance, containing the current animation state.
 #[repr(C)]
-#[derive(Debug, Clone, Copy, Reflect, ShaderType)]
+#[derive(Debug, Clone, Copy, Reflect, ShaderType, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct VatInstanceData {
     /// The starting frame of the animation clip.
     pub start_frame: u32,

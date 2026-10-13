@@ -77,9 +77,7 @@ pub fn auto_setup_vat_materials(
                     base_mat.alpha_mode = AlphaMode::Mask(0.0);
                 }
 
-                let mut shader_buffer = ShaderBuffer::default();
-                shader_buffer.set_data(vec![VatInstanceData::default()]);
-                let buffer = buffers.add(shader_buffer);
+                let buffer = buffers.add(ShaderBuffer::from(vec![VatInstanceData::default()]));
                 let mat = vat_materials.add(ExtendedMaterial {
                     base: base_mat,
                     extension: OpenVatExtension {
@@ -98,7 +96,7 @@ pub fn auto_setup_vat_materials(
             commands
                 .entity(entity)
                 .remove::<MeshMaterial3d<StandardMaterial>>()
-                .insert((MeshMaterial3d(extended_mat), VatMaterialReady, MeshTag(0)));
+                .insert((MeshMaterial3d(extended_mat), VatMaterialReady, MeshTag::new(0)));
         }
 
         propagate_to_descendants(
@@ -150,8 +148,8 @@ pub fn update_instance_data(
 
         let index = batch.len() as u32;
 
-        if mesh_tag.0 != index {
-            mesh_tag.0 = index;
+        if mesh_tag.value != index {
+            mesh_tag.value = index;
         }
 
         let Some(clip) = clips.get(&animator.current_clip) else {
@@ -183,7 +181,8 @@ pub fn update_instance_data(
         if !material_batches.contains_key(mat_id) {
             if let Some(mat) = materials.get(*mat_id) {
                 if let Some(mut buffer) = buffers.get_mut(&mat.extension.instance) {
-                    buffer.set_data(vec![VatInstanceData::default()]);
+                    buffer.clear();
+                    buffer.extend([VatInstanceData::default()]);
                 }
             }
         }
@@ -195,7 +194,8 @@ pub fn update_instance_data(
 
         if let Some(mat) = materials.get(mat_id) {
             if let Some(mut buffer) = buffers.get_mut(&mat.extension.instance) {
-                buffer.set_data(data);
+                buffer.clear();
+                buffer.extend_from_slice(&data);
             }
         }
 

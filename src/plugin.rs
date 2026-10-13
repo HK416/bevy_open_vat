@@ -25,9 +25,9 @@ impl Plugin for OpenVatPlugin {
             OPENVAT_COMMON_SHADER_HANDLE,
             concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/assets/shaders/openvat_common.wgsl"
+                "/assets/shaders/openvat_common.wesl"
             ),
-            Shader::from_wgsl
+            |source, _| Shader::from_wesl(source, "embedded://bevy_open_vat/openvat_common.wesl")
         );
 
         load_internal_asset!(
@@ -35,9 +35,9 @@ impl Plugin for OpenVatPlugin {
             OPENVAT_SHADER_HANDLE,
             concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/assets/shaders/openvat_pbr.wgsl"
+                "/assets/shaders/openvat_pbr.wesl"
             ),
-            Shader::from_wgsl
+            |source, _| Shader::from_wesl(source, "embedded://bevy_open_vat/openvat_pbr.wesl")
         );
 
         load_internal_asset!(
@@ -45,9 +45,9 @@ impl Plugin for OpenVatPlugin {
             OPENVAT_PREPASS_SHADER_HANDLE,
             concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/assets/shaders/openvat_prepass.wgsl"
+                "/assets/shaders/openvat_prepass.wesl"
             ),
-            Shader::from_wgsl
+            |source, _| Shader::from_wesl(source, "embedded://bevy_open_vat/openvat_prepass.wesl")
         );
 
         type Plugin = MaterialPlugin<ExtendedMaterial<StandardMaterial, OpenVatExtension>>;

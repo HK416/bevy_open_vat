@@ -1,21 +1,17 @@
-#import bevy_pbr::mesh_functions;
-#import bevy_pbr::mesh_functions::get_world_from_local;
-#import bevy_pbr::mesh_functions::mesh_position_local_to_world;
-#import bevy_pbr::mesh_functions::mesh_normal_local_to_world;
-#import bevy_pbr::view_transformations::position_world_to_clip
-#import bevy_pbr::forward_io::VertexOutput;
-#import bevy_pbr::mesh_view_bindings::globals;
-#import bevy_open_vat::common::{apply_vat, get_vat_data_safe};
+import bevy_pbr::{
+    render::{
+        mesh_functions::{get_tag, get_world_from_local, mesh_position_local_to_world, mesh_normal_local_to_world},
+        view_transformations::position_world_to_clip,
+    },
+    prepass::io::{Vertex, VertexOutput},
+};
+import bevy_render::globals::Globals;
+import bevy_open_vat::openvat_common::{apply_vat, get_vat_data_safe};
 
-// --- Structures ---
-
-struct Vertex {
-    @builtin(instance_index) instance_index: u32,
-    @location(0) position: vec3<f32>,
-    @location(1) normal: vec3<f32>,
-    @location(2) uv: vec2<f32>,
-    @location(3) uv_b: vec2<f32>,
-}
+// Prepass uses a simpler view bind group than the main pass,
+// so mesh_view_bindings::globals (binding 11) cannot be used.
+// We must declare the binding directly.
+@group(0) @binding(1) var<uniform> globals: Globals;
 
 // --- Vertex Shader ---
 
@@ -23,9 +19,9 @@ struct Vertex {
 fn main(vertex: Vertex) -> VertexOutput {
     var out: VertexOutput;
 
-    let tag = mesh_functions::get_tag(vertex.instance_index);
+    let tag = get_tag(vertex.instance_index);
     let my_data = get_vat_data_safe(tag);
-    
+
     let raw_progress = globals.time * my_data.rate + my_data.offset;
     let progress = fract(raw_progress);
 
@@ -41,13 +37,18 @@ fn main(vertex: Vertex) -> VertexOutput {
     // Local -> World (Position)
     out.world_position = mesh_position_local_to_world(world_from_local, vec4<f32>(new_position, 1.0));
     
-    // Local -> World (Normal)
-    out.world_normal = mesh_normal_local_to_world(new_normal, vertex.instance_index);
-    
     // World -> Clip
     out.position = position_world_to_clip(out.world_position.xyz);
     
+    @if(VERTEX_UVS_A)
     out.uv = vertex.uv;
-    
+
+    @if(VERTEX_UVS_B)
+    out.uv_b = vertex.uv_b;
+
+    // Local -> World (Normal)
+    @if(NORMAL_PREPASS_OR_DEFERRED_PREPASS && VERTEX_NORMALS)
+    out.world_normal = mesh_normal_local_to_world(new_normal, vertex.instance_index);
+
     return out;
 }

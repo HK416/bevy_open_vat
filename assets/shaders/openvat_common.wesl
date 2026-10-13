@@ -1,5 +1,3 @@
-#define_import_path bevy_open_vat::common
-
 // --- Structures ---
 
 struct OpenVatParams {
@@ -18,10 +16,10 @@ struct VatInstanceData {
 
 // --- Bindings ---
 
-@group(#{MATERIAL_BIND_GROUP}) @binding(100) var vat_texture: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(101) var vat_sampler: sampler;
-@group(#{MATERIAL_BIND_GROUP}) @binding(102) var<uniform> ext: OpenVatParams;
-@group(#{MATERIAL_BIND_GROUP}) @binding(103) var<storage, read> instance_data: array<VatInstanceData>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(100) var vat_texture: texture_2d<f32>;
+@group(constants::MATERIAL_BIND_GROUP) @binding(101) var vat_sampler: sampler;
+@group(constants::MATERIAL_BIND_GROUP) @binding(102) var<uniform> ext: OpenVatParams;
+@group(constants::MATERIAL_BIND_GROUP) @binding(103) var<storage, read> instance_data: array<VatInstanceData>;
 
 // --- Utility Functions ---
 

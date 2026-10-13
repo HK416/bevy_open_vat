@@ -2,7 +2,7 @@
 
 [![Crates.io](https://img.shields.io/crates/v/bevy_open_vat.svg)](https://crates.io/crates/bevy_open_vat)
 [![MIT/Apache 2.0](https://img.shields.io/badge/license-MIT%2FApache-blue.svg)](./LICENSE-MIT)
-[![Bevy](https://img.shields.io/badge/Bevy-0.19-orange)](https://bevyengine.org/)
+[![Bevy](https://img.shields.io/badge/Bevy-0.20-orange)](https://bevyengine.org/)
 
 **Bevy OpenVAT** is a high-performance Vertex Animation Texture (VAT) plugin for the Bevy game engine. It enables rendering massive amounts of animated meshes with minimal CPU overhead by offloading animation processing to the vertex shader.
 
@@ -18,6 +18,7 @@
 
 | Bevy Version | Crate Version |
 | :--- | :--- |
+| `0.20` | `0.20` |
 | `0.19` | `0.19` |
 | `0.18` | `0.18` |
 
@@ -25,8 +26,8 @@ Add the following to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-bevy = "0.19"
-bevy_open_vat = "0.19.0"
+bevy = "0.20"
+bevy_open_vat = "0.20.0"
 ```
 
 ## Usage
