@@ -246,7 +246,7 @@ mod tests {
     fn test_instance_data_default() {
         let d = VatInstanceData::default();
         assert_eq!(d.start_frame, 0);
-        assert_eq!(d.frame_count, 1);
+        assert_eq!(d.frame_count, 0);
         assert_eq!(d.rate, 0.0);
         assert_eq!(d.offset, 0.0);
     }

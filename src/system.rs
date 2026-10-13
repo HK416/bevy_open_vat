@@ -1,4 +1,5 @@
 use bevy::{
+    asset::asset_changed::AssetChanged,
     camera::{
         primitives::{Aabb, MeshAabb},
         visibility::NoAutoAabb,
@@ -150,7 +151,6 @@ pub fn update_instance_data(
     >,
     mut removed_animators: RemovedComponents<VatAnimator>,
     mut removed_materials: RemovedComponents<MeshMaterial3d<VatStandardMaterial>>,
-    mut clip_events: MessageReader<AssetEvent<VatAnimationClip>>,
     time: Res<Time>,
     mut last_wrap_base: Local<f64>,
     clips: Res<Assets<VatAnimationClip>>,
@@ -162,8 +162,9 @@ pub fn update_instance_data(
     *last_wrap_base = wrap_base;
     // Drain every reader each frame, even when another check already marked us dirty.
     let removed = removed_animators.read().count() + removed_materials.read().count() > 0;
-    let clips_changed = clip_events.read().count() > 0;
-    if changed.is_empty() && !removed && !clips_changed && !time_wrapped {
+    // Asset events for clips are only flushed after this system runs, so watch the collection
+    // itself: a clip that finished loading this frame is picked up this frame.
+    if changed.is_empty() && !removed && !clips.is_changed() && !time_wrapped {
         return;
     }
 
@@ -216,7 +217,15 @@ pub fn update_vat_aabbs(
     mut commands: Commands,
     meshes: Res<Assets<Mesh>>,
     remap_infos: Res<Assets<RemapInfo>>,
-    query: Query<(Entity, &Mesh3d, &VatAnimator), (With<VatMaterialReady>, Without<NoAutoAabb>)>,
+    query: Query<
+        (Entity, &Mesh3d, &VatAnimator),
+        (
+            With<VatMaterialReady>,
+            // `NoAutoAabb` stops Bevy from refreshing the bounds, so refresh them here when the
+            // mesh is swapped or its asset changes.
+            Or<(Without<NoAutoAabb>, Changed<Mesh3d>, AssetChanged<Mesh3d>)>,
+        ),
+    >,
 ) {
     for (entity, mesh, animator) in &query {
         let Some(rest) = meshes.get(mesh).and_then(|mesh| mesh.get_aabb()) else {
@@ -259,7 +268,6 @@ pub fn track_clip_finish(
     mut commands: Commands,
     time: Res<Time>,
     clips: Res<Assets<VatAnimationClip>>,
-    mut clip_events: MessageReader<AssetEvent<VatAnimationClip>>,
     all: Query<(Entity, &VatAnimator), Without<VatAnimatorOf>>,
     changed: Query<(Entity, &VatAnimator), (Changed<VatAnimator>, Without<VatAnimatorOf>)>,
     mut removed: RemovedComponents<VatAnimator>,
@@ -276,7 +284,7 @@ pub fn track_clip_finish(
             None => pending.remove(&entity),
         };
     };
-    if clip_events.read().count() > 0 {
+    if clips.is_changed() {
         all.iter().for_each(&mut schedule);
     } else {
         changed.iter().for_each(&mut schedule);

@@ -25,7 +25,7 @@ struct VatInstanceData {
 fn get_vat_data_safe(tag: u32) -> VatInstanceData {
     let len = arrayLength(&instance_data);
     if len == 0u {
-        return VatInstanceData(0u, 1u, 0.0, 0.0, 1u);
+        return VatInstanceData(0u, 0u, 0.0, 0.0, 1u);
     }
     let safe_tag = tag % len;
     return instance_data[safe_tag];
@@ -44,11 +44,16 @@ struct VatSample {
 // frames are therefore `start + 1 ..= end`, and a loop runs end -> start + 1 -> ... -> end.
 fn vat_sample(data: VatInstanceData, time: f32, uv_vat: vec2<f32>) -> VatSample {
     let progress = time * data.rate + data.offset;
-    let count = max(data.frame_count, 1u);
+    let count = data.frame_count;
     var curr: u32;
     var next: u32;
     var blend: f32;
-    if data.looping != 0u {
+    if count == 0u {
+        // No clip: show `start_frame` (frame 0 for the default data) without animating.
+        curr = data.start_frame;
+        next = curr;
+        blend = 0.0;
+    } else if data.looping != 0u {
         let local = fract(progress) * f32(count);
         let k = min(u32(local), count - 1u);
         // Pose 0 is the clip's first pose, stored at `end`.
