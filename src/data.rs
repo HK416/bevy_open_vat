@@ -144,6 +144,8 @@ impl VatAnimator {
     }
 
     /// Switches to `clip` and plays it from the start.
+    ///
+    /// To play a clip backwards from its end, set a negative speed and `seek` to its duration.
     pub fn play(&mut self, clip: Handle<VatAnimationClip>, time: &Time) {
         self.current_clip = clip;
         self.is_playing = true;

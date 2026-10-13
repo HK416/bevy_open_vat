@@ -266,7 +266,10 @@ fn keyboard_animation_control(
 
     for mut controller in &mut animation_player {
         if let Some(clip) = &new_clip {
+            // Keep each fox's position so the crowd stays desynchronized.
+            let elapsed = controller.elapsed(&time);
             controller.play(clip.clone(), &time);
+            controller.seek(elapsed, &time);
         }
 
         if keyboard_input.just_pressed(KeyCode::Space) {

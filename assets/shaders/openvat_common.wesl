@@ -40,8 +40,8 @@ struct VatSample {
 };
 
 // OpenVAT clip ranges share their boundary frame with the neighbouring clip: frame `start` holds
-// the previous clip's last pose, and frame `end` repeats this clip's first pose. A clip's own
-// frames are therefore `start + 1 ..= end`, and a loop runs end -> start + 1 -> ... -> end.
+// the previous clip's last pose, so a clip's own frames are `start + 1 ..= end`. Looping clips are
+// authored so that `end` repeats their first pose, so a loop runs end -> start + 1 -> ... -> end.
 fn vat_sample(data: VatInstanceData, time: f32, uv_vat: vec2<f32>) -> VatSample {
     let progress = time * data.rate + data.offset;
     let count = data.frame_count;
@@ -61,7 +61,7 @@ fn vat_sample(data: VatInstanceData, time: f32, uv_vat: vec2<f32>) -> VatSample 
         next = data.start_frame + k + 1u;
         blend = fract(local);
     } else {
-        // Play the clip's own frames once, then hold the last one.
+        // Play the clip's own frames once, then hold the last one (`end`).
         let local = saturate(progress) * f32(count - 1u);
         let k = min(u32(local), count - 1u);
         curr = data.start_frame + 1u + k;
