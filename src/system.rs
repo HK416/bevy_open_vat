@@ -1,5 +1,5 @@
 use bevy::{
-    mesh::MeshTag, pbr::ExtendedMaterial, platform::collections::HashMap, prelude::*,
+    mesh::MeshTag, pbr::ExtendedMaterial, platform::collections::{HashMap, HashSet}, prelude::*,
     render::storage::ShaderBuffer,
 };
 
@@ -119,11 +119,9 @@ pub fn update_instance_data(
         &MeshMaterial3d<ExtendedMaterial<StandardMaterial, OpenVatExtension>>,
     )>,
     clips: Res<Assets<VatAnimationClip>>,
-    mut materials: ResMut<Assets<ExtendedMaterial<StandardMaterial, OpenVatExtension>>>,
+    materials: Res<Assets<ExtendedMaterial<StandardMaterial, OpenVatExtension>>>,
     mut buffers: ResMut<Assets<ShaderBuffer>>,
-    mut last_counts: Local<
-        HashMap<AssetId<ExtendedMaterial<StandardMaterial, OpenVatExtension>>, usize>,
-    >,
+    mut last_active: Local<HashSet<AssetId<ExtendedMaterial<StandardMaterial, OpenVatExtension>>>>,
 ) {
     let mut sorted_entities: Vec<_> = controller_query.iter_mut().collect();
     sorted_entities.sort_by_key(|(entity, _, _, _)| *entity);
@@ -169,7 +167,7 @@ pub fn update_instance_data(
     }
 
     // Reset buffers for materials that are no longer actively used this frame
-    for (mat_id, _) in last_counts.iter() {
+    for mat_id in last_active.iter() {
         if !material_batches.contains_key(mat_id) {
             if let Some(mat) = materials.get(*mat_id) {
                 if let Some(mut buffer) = buffers.get_mut(&mat.extension.instance) {
@@ -180,28 +178,18 @@ pub fn update_instance_data(
         }
     }
 
-    // Update instance data buffers for active materials
-    for (mat_id, data) in material_batches {
-        let new_len = data.len();
-
-        if let Some(mat) = materials.get(mat_id) {
+    // Update instance data buffers for active materials.
+    // Bevy rebuilds the material bind group by itself when a buffer is reallocated.
+    for (mat_id, data) in &material_batches {
+        if let Some(mat) = materials.get(*mat_id) {
             if let Some(mut buffer) = buffers.get_mut(&mat.extension.instance) {
                 buffer.clear();
-                buffer.extend_from_slice(&data);
-            }
-        }
-
-        // Force a BindGroup rebuild if the buffer size has changed (Bevy 0.19 workaround)
-        let last_len = last_counts.entry(mat_id).or_insert(0);
-        if *last_len != new_len {
-            *last_len = new_len;
-            if let Some(mut mat_mut) = materials.get_mut(mat_id) {
-                let _ = &mut *mat_mut; // Explicit DerefMut triggers AssetEvent::Modified
+                buffer.extend_from_slice(data);
             }
         }
     }
 
-    last_counts.retain(|id, _| materials.contains(*id));
+    *last_active = material_batches.into_keys().collect();
 }
 
 /// Propagates the `VatAnimator` to all descendant entities using a breadth-first search.
