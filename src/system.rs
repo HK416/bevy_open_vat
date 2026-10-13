@@ -1,5 +1,5 @@
 use bevy::{
-    mesh::MeshTag, pbr::ExtendedMaterial, platform::collections::{HashMap, HashSet}, prelude::*,
+    mesh::MeshTag, pbr::ExtendedMaterial, platform::collections::HashMap, prelude::*,
     render::storage::ShaderBuffer,
 };
 
@@ -121,7 +121,6 @@ pub fn update_instance_data(
     clips: Res<Assets<VatAnimationClip>>,
     materials: Res<Assets<ExtendedMaterial<StandardMaterial, OpenVatExtension>>>,
     mut buffers: ResMut<Assets<ShaderBuffer>>,
-    mut last_active: Local<HashSet<AssetId<ExtendedMaterial<StandardMaterial, OpenVatExtension>>>>,
 ) {
     let mut sorted_entities: Vec<_> = controller_query.iter_mut().collect();
     sorted_entities.sort_by_key(|(entity, _, _, _)| *entity);
@@ -166,30 +165,26 @@ pub fn update_instance_data(
         });
     }
 
-    // Reset buffers for materials that are no longer actively used this frame
-    for mat_id in last_active.iter() {
-        if !material_batches.contains_key(mat_id) {
-            if let Some(mat) = materials.get(*mat_id) {
-                if let Some(mut buffer) = buffers.get_mut(&mat.extension.instance) {
-                    buffer.clear();
-                    buffer.extend([VatInstanceData::default()]);
-                }
-            }
-        }
-    }
-
-    // Update instance data buffers for active materials.
+    // Sync every VAT material's buffer; materials with no active instances get a single default entry.
+    // Animation time advances on the GPU, so buffers are only written when their contents change.
     // Bevy rebuilds the material bind group by itself when a buffer is reallocated.
-    for (mat_id, data) in &material_batches {
-        if let Some(mat) = materials.get(*mat_id) {
-            if let Some(mut buffer) = buffers.get_mut(&mat.extension.instance) {
-                buffer.clear();
-                buffer.extend_from_slice(data);
-            }
+    let idle = [VatInstanceData::default()];
+    for (mat_id, mat) in materials.iter() {
+        let data = material_batches.get(&mat_id).map_or(&idle[..], Vec::as_slice);
+        let handle = &mat.extension.instance;
+        if !buffers.get(handle).is_some_and(|buffer| needs_write(buffer, data)) {
+            continue;
+        }
+        if let Some(mut buffer) = buffers.get_mut(handle) {
+            buffer.clear();
+            buffer.extend_from_slice(data);
         }
     }
+}
 
-    *last_active = material_batches.into_keys().collect();
+/// Returns `true` if `buffer` does not already hold exactly `data`.
+fn needs_write(buffer: &ShaderBuffer, data: &[VatInstanceData]) -> bool {
+    buffer.cast_slice::<VatInstanceData>() != Some(data)
 }
 
 /// Propagates the `VatAnimator` to all descendant entities using a breadth-first search.
@@ -221,5 +216,28 @@ fn propagate_to_descendants(
         if let Ok(grandchildren) = children_query.get(child) {
             queue.extend(grandchildren.iter());
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn instance(rate: f32) -> VatInstanceData {
+        VatInstanceData {
+            rate,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_needs_write() {
+        let data = vec![instance(1.0), instance(2.0)];
+        let buffer = ShaderBuffer::from(data.clone());
+
+        assert!(!needs_write(&buffer, &data));
+        assert!(needs_write(&buffer, &[instance(1.0), instance(3.0)]));
+        assert!(needs_write(&buffer, &data[..1]));
+        assert!(needs_write(&ShaderBuffer::default(), &data));
     }
 }
