@@ -1,4 +1,4 @@
-use bevy::asset::{load_internal_asset, uuid_handle};
+use bevy::asset::{AssetEventSystems, load_internal_asset, uuid_handle};
 use bevy::{pbr::ExtendedMaterial, prelude::*};
 
 use crate::asset::{RemapInfo, RemapInfoAssetLoader};
@@ -56,6 +56,8 @@ impl Plugin for OpenVatPlugin {
             .register_asset_loader(RemapInfoAssetLoader)
             .add_plugins(Plugin::default())
             .add_systems(Update, auto_setup_vat_materials)
-            .add_systems(PostUpdate, update_instance_data);
+            // Buffer writes must land before this frame's asset events are flushed,
+            // otherwise the render world sees them a frame after the matching `MeshTag` changes.
+            .add_systems(PostUpdate, update_instance_data.before(AssetEventSystems));
     }
 }
