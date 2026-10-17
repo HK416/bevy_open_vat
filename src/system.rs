@@ -78,10 +78,12 @@ pub fn auto_setup_vat_materials(
             let extended_mat = if let Some(cached_mat) = material_cache.get(&cache_key) {
                 cached_mat.clone()
             } else {
-                let base_mat = std_materials
-                    .get(&mat_handle.0)
-                    .cloned()
-                    .unwrap_or_default();
+                // Wait for the material to load; a glTF material usually arrives after the
+                // small remap JSON, and converting a missing material would bake the default
+                // white material into the cache.
+                let Some(base_mat) = std_materials.get(&mat_handle.0).cloned() else {
+                    continue;
+                };
 
                 let buffer = buffers.add(ShaderBuffer::from(vec![VatInstanceData::default()]));
                 let mat = vat_materials.add(ExtendedMaterial {
@@ -362,5 +364,85 @@ mod tests {
         assert!(needs_write(&buffer, &[instance(1.0), instance(3.0)]));
         assert!(needs_write(&buffer, &data[..1]));
         assert!(needs_write(&ShaderBuffer::default(), &data));
+    }
+
+    /// A render-less app running the plugin's systems. `Shader` and `ShaderBuffer` assets are
+    /// normally registered by the render plugins the plugin's `build` relies on.
+    fn test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<Shader>()
+            .init_asset::<Mesh>()
+            .init_asset::<Image>()
+            .init_asset::<StandardMaterial>()
+            .init_asset::<ShaderBuffer>()
+            .add_plugins(crate::plugin::OpenVatPlugin);
+        app
+    }
+
+    fn remap_handle(app: &mut App) -> Handle<RemapInfo> {
+        app.world_mut()
+            .resource_mut::<Assets<RemapInfo>>()
+            .add(RemapInfo {
+                os_remap: crate::asset::OsRemap {
+                    min: [-1.0; 3],
+                    max: [1.0; 3],
+                    frames: 4,
+                },
+                animations: default(),
+            })
+    }
+
+    #[test]
+    fn test_waits_for_standard_material() {
+        let mut app = test_app();
+        let remap = remap_handle(&mut app);
+        let image = app
+            .world_mut()
+            .resource_mut::<Assets<Image>>()
+            .add(Image::default());
+        let pending = app
+            .world_mut()
+            .resource_mut::<Assets<StandardMaterial>>()
+            .reserve_handle();
+        let entity = app
+            .world_mut()
+            .spawn((
+                VatAnimator::new(remap, image, Handle::default()),
+                MeshMaterial3d(pending.clone()),
+            ))
+            .id();
+
+        app.update();
+        assert!(
+            app.world()
+                .get::<MeshMaterial3d<StandardMaterial>>(entity)
+                .is_some(),
+            "must keep the original material until it is loaded"
+        );
+        assert!(
+            app.world()
+                .get::<MeshMaterial3d<VatStandardMaterial>>(entity)
+                .is_none()
+        );
+
+        let red = Color::srgb(1.0, 0.0, 0.0);
+        app.world_mut()
+            .resource_mut::<Assets<StandardMaterial>>()
+            .insert(
+                &pending,
+                StandardMaterial {
+                    base_color: red,
+                    ..default()
+                },
+            )
+            .unwrap();
+        app.update();
+        let vat = app
+            .world()
+            .get::<MeshMaterial3d<VatStandardMaterial>>(entity)
+            .expect("converted once the material is loaded");
+        let materials = app.world().resource::<Assets<VatStandardMaterial>>();
+        assert_eq!(materials.get(&vat.0).unwrap().base.base_color, red);
     }
 }
