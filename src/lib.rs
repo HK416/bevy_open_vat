@@ -19,3 +19,6 @@ pub mod prelude {
     pub use crate::material::OpenVatExtension;
     pub use crate::plugin::OpenVatPlugin;
 }
+
+#[cfg(test)]
+mod render_tests;
