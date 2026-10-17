@@ -11,27 +11,23 @@ use crate::asset::{RemapInfo, VatAnimationClip};
 #[derive(Component)]
 pub struct VatMaterialReady;
 
-/// Marker component to indicate that VatAnimator has been propagated to children.
-/// Unlike VatMaterialReady, this is for entities without StandardMaterial (container nodes).
-#[derive(Component)]
-pub struct VatPropagated;
-
-/// Links a mesh entity's `VatAnimator` copy to the animator on the entity it was propagated from.
+/// Links a mesh entity to the `VatAnimator` that drives it, on an ancestor such as the glTF
+/// scene root.
 ///
-/// Changes to the source animator are copied to every linked mesh automatically, so control
-/// playback on the source (for example the glTF scene root), not on the linked meshes.
+/// The mesh has no animator of its own; the plugin reads the source's. Control playback on the
+/// source.
 #[derive(Component, Debug)]
 #[relationship(relationship_target = VatAnimatedMeshes)]
 pub struct VatAnimatorOf(pub Entity);
 
-/// The mesh entities that receive copies of this entity's `VatAnimator`.
+/// The mesh entities driven by this entity's `VatAnimator`.
 #[derive(Component, Debug)]
 #[relationship_target(relationship = VatAnimatorOf)]
 pub struct VatAnimatedMeshes(Vec<Entity>);
 
 /// Triggered on the entity that owns a `VatAnimator` when a non-looping clip reaches its end.
 ///
-/// For propagated animators it is only triggered on the source entity, not on the linked meshes.
+/// It is triggered on the entity holding the animator, not on the meshes linked to it.
 #[derive(EntityEvent, Debug, Clone)]
 pub struct VatClipFinished {
     /// The entity whose clip finished.
@@ -78,7 +74,7 @@ impl Default for VatAnimator {
 }
 
 /// Anchors a newly inserted animator at the current time, including one that replaces an existing
-/// animator. Propagated copies keep their source's anchor.
+/// animator. A clone of an anchored animator keeps that anchor.
 fn anchor_on_insert(mut world: DeferredWorld, context: HookContext) {
     let Some(now) = world.get_resource::<Time>().map(Time::elapsed_secs_f64) else {
         return;
@@ -196,10 +192,15 @@ impl VatAnimator {
     /// folding it into `offset` keeps playback continuous when the shader's time wraps.
     pub fn instance_data(&self, clip: &VatAnimationClip, wrap_base: f64) -> VatInstanceData {
         let duration = clip.duration().filter(|d| *d > 0.0).unwrap_or(1.0) as f64;
-        let speed = if self.is_playing { self.speed as f64 } else { 0.0 };
+        let speed = if self.is_playing {
+            self.speed as f64
+        } else {
+            0.0
+        };
         let anchor_time = self.anchor_time.unwrap_or(wrap_base);
 
-        let mut offset = (self.anchor_elapsed as f64 + (wrap_base - anchor_time) * speed) / duration;
+        let mut offset =
+            (self.anchor_elapsed as f64 + (wrap_base - anchor_time) * speed) / duration;
         if clip.looping {
             // Only the fractional cycle matters for a loop, and dropping the whole cycles keeps
             // the f32 offset precise however long the app has been running.
@@ -304,7 +305,11 @@ mod tests {
         assert_eq!(animator.elapsed(&time_at(11.5)), 1.5);
 
         animator.set_speed(2.0, &time_at(11.5));
-        assert_eq!(animator.elapsed(&time_at(11.5)), 1.5, "speed change must not jump");
+        assert_eq!(
+            animator.elapsed(&time_at(11.5)),
+            1.5,
+            "speed change must not jump"
+        );
         assert_eq!(animator.elapsed(&time_at(12.0)), 2.5);
     }
 
@@ -327,7 +332,11 @@ mod tests {
         animator.pause(&time_at(6.0));
         animator.play(Handle::default(), &time_at(8.0));
         assert!(animator.is_playing());
-        assert_eq!(animator.elapsed(&time_at(10.0)), 1.0, "play restarts at the clip start");
+        assert_eq!(
+            animator.elapsed(&time_at(10.0)),
+            1.0,
+            "play restarts at the clip start"
+        );
     }
 
     #[test]
@@ -339,7 +348,10 @@ mod tests {
             let expected = animator.elapsed(&time) / clip.duration().unwrap();
             assert!((cycle(gpu_progress(&animator, &clip, &time)) - cycle(expected)).abs() < 1e-4);
 
-            let once = VatAnimationClip { looping: false, ..clip };
+            let once = VatAnimationClip {
+                looping: false,
+                ..clip
+            };
             assert!((gpu_progress(&animator, &once, &time) - expected).abs() < 1e-4);
         }
     }
@@ -356,7 +368,8 @@ mod tests {
         after.advance_to(Duration::from_secs_f64(10.5));
 
         // Shader time jumps from 9.5 to 0.5, but progress must still advance by 1 second.
-        let delta = gpu_progress(&animator, &clip, &after) - gpu_progress(&animator, &clip, &before);
+        let delta =
+            gpu_progress(&animator, &clip, &after) - gpu_progress(&animator, &clip, &before);
         assert!((cycle(delta) - 1.0 / clip.duration().unwrap()).abs() < 1e-4);
     }
 
@@ -366,7 +379,11 @@ mod tests {
         let animator = animator_at(0.0);
         // A day in, with the default one-hour wrap period.
         let data = animator.instance_data(&clip, 24.0 * 3600.0);
-        assert!((0.0..1.0).contains(&data.offset), "offset {} lost f32 precision", data.offset);
+        assert!(
+            (0.0..1.0).contains(&data.offset),
+            "offset {} lost f32 precision",
+            data.offset
+        );
     }
 
     #[test]
@@ -374,31 +391,48 @@ mod tests {
         let mut world = World::new();
         world.insert_resource(time_at(3.0));
         let entity = world.spawn(VatAnimator::default()).id();
-        assert_eq!(world.get::<VatAnimator>(entity).unwrap().anchor_time, Some(3.0));
+        assert_eq!(
+            world.get::<VatAnimator>(entity).unwrap().anchor_time,
+            Some(3.0)
+        );
 
         world.insert_resource(time_at(7.0));
         world.entity_mut(entity).insert(VatAnimator::default());
-        assert_eq!(world.get::<VatAnimator>(entity).unwrap().anchor_time, Some(7.0));
+        assert_eq!(
+            world.get::<VatAnimator>(entity).unwrap().anchor_time,
+            Some(7.0)
+        );
 
-        // Copies propagated to child meshes keep their source's anchor.
+        // A clone keeps its anchor.
         let copy = world.get::<VatAnimator>(entity).unwrap().clone();
         world.insert_resource(time_at(9.0));
         let child = world.spawn(copy).id();
-        assert_eq!(world.get::<VatAnimator>(child).unwrap().anchor_time, Some(7.0));
+        assert_eq!(
+            world.get::<VatAnimator>(child).unwrap().anchor_time,
+            Some(7.0)
+        );
     }
 
     #[test]
     fn test_finish_time() {
         let animator = animator_at(10.0).with_elapsed(0.5);
         assert_eq!(animator.finish_time(&clip(false)), Some(11.5));
-        assert_eq!(animator.finish_time(&clip(true)), None, "looping clips never finish");
+        assert_eq!(
+            animator.finish_time(&clip(true)),
+            None,
+            "looping clips never finish"
+        );
         assert_eq!(animator.clone().paused().finish_time(&clip(false)), None);
 
         let backwards = animator_at(10.0).with_elapsed(0.5).with_speed(-0.5);
         assert_eq!(backwards.finish_time(&clip(false)), Some(11.0));
 
         let past_end = animator_at(10.0).with_elapsed(5.0);
-        assert_eq!(past_end.finish_time(&clip(false)), None, "already finished: no second event");
+        assert_eq!(
+            past_end.finish_time(&clip(false)),
+            None,
+            "already finished: no second event"
+        );
     }
 
     #[test]

@@ -98,10 +98,10 @@ trigger a `VatClipFinished` event on the entity when they end.
 
 ### Scenes and hierarchies
 
-When `VatAnimator` is added to a parent such as a glTF scene root, the plugin copies it to every
-descendant mesh and links them with `VatAnimatorOf`. Keep controlling the parent: its changes are
-copied to the meshes automatically. To touch only the parents in a query, filter with
-`Without<VatAnimatorOf>`.
+When `VatAnimator` is added to a parent such as a glTF scene root, every descendant mesh with a
+`StandardMaterial` is linked to it with `VatAnimatorOf` and reads its playback state. The meshes
+get no animator of their own, so `Query<&mut VatAnimator>` only sees the parents; control playback
+there. Meshes added under the parent later (for example equipment) are linked when they appear.
 
 ### Rendering notes
 

@@ -4,7 +4,7 @@ use bevy::{pbr::ExtendedMaterial, prelude::*};
 use crate::asset::{RemapInfo, RemapInfoAssetLoader};
 use crate::material::OpenVatExtension;
 use crate::system::{
-    auto_setup_vat_materials, sync_propagated_animators, track_clip_finish, update_instance_data,
+    auto_setup_vat_materials, link_vat_meshes, track_clip_finish, update_instance_data,
     update_vat_aabbs,
 };
 
@@ -60,16 +60,14 @@ impl Plugin for OpenVatPlugin {
             .add_plugins(Plugin::default())
             .add_systems(
                 Update,
-                (auto_setup_vat_materials, update_vat_aabbs).chain(),
+                (link_vat_meshes, auto_setup_vat_materials, update_vat_aabbs).chain(),
             )
             // Buffer writes must land before this frame's asset events are flushed,
             // otherwise the render world sees them a frame after the matching `MeshTag` changes.
             .add_systems(
                 PostUpdate,
                 (
-                    (sync_propagated_animators, update_instance_data)
-                        .chain()
-                        .before(AssetEventSystems),
+                    update_instance_data.before(AssetEventSystems),
                     track_clip_finish,
                 ),
             );
