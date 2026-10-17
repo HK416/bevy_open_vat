@@ -93,11 +93,13 @@ pub fn compact_vat_textures(
             .filter(|a| a.vat_texture.id() == id)
             .find_map(|a| remaps.get(&a.remap_info))
             .map(|remap| remap.os_remap.frames);
-        if let Some(frames) = frames.filter(|f| *f > 0)
-            && !image.height().is_multiple_of(2 * frames)
+        // OpenVAT pads the texture to a power-of-two height; normals start at `height / 2`,
+        // so only a texture too short for its frames is a problem.
+        if let Some(frames) = frames
+            && image.height() < 2 * frames
         {
             warn!(
-                "VAT texture {id:?} height {} is not a multiple of 2 × {frames} frames",
+                "VAT texture {id:?} height {} has fewer than 2 × {frames} rows",
                 image.height()
             );
         }
