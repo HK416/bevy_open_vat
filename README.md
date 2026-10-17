@@ -27,10 +27,13 @@ Add the following to your `Cargo.toml`:
 ```toml
 [dependencies]
 bevy = "0.20"
-bevy_open_vat = "0.20.0"
+bevy_open_vat = "0.20"
 ```
 
 Bevy 0.20 requires Rust 1.97.1 or newer.
+
+The default `exr` feature enables Bevy's EXR image loader, which OpenVAT textures need. If your
+VAT textures come in another format, disable it with `default-features = false`.
 
 ## Usage
 

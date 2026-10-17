@@ -16,10 +16,13 @@ exclude = [
     "Cargo.lock",
 ]
 
+[features]
+default = ["exr"]
+# OpenVAT exports EXR textures. Disable if your VAT textures use another format.
+exr = ["bevy/exr"]
+
 [dependencies]
 bevy = { version = "0.20", default-features = false, features = [
-    "3d_bevy_render",
-    "bevy_render",
     "bevy_pbr",
     "bevy_log",
 ]}
