@@ -37,3 +37,8 @@ bevy = { version = "0.20", features = ["exr", "x11", "wayland"] }
 
 [profile.dev.package."*"]
 opt-level = 3
+
+# Bevy systems routinely take many parameters and nested query types.
+[lints.clippy]
+type_complexity = "allow"
+too_many_arguments = "allow"

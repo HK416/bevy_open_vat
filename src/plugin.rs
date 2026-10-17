@@ -64,12 +64,10 @@ impl Plugin for OpenVatPlugin {
             )
             // Buffer writes must land before this frame's asset events are flushed,
             // otherwise the render world sees them a frame after the matching `MeshTag` changes.
+            // Both systems read clip events, so both see a load on the same (next) frame.
             .add_systems(
                 PostUpdate,
-                (
-                    update_instance_data.before(AssetEventSystems),
-                    track_clip_finish,
-                ),
+                (update_instance_data, track_clip_finish).before(AssetEventSystems),
             );
     }
 }

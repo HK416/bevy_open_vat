@@ -4,7 +4,10 @@ use bevy::{
         primitives::{Aabb, MeshAabb},
         visibility::NoAutoAabb,
     },
-    ecs::entity::EntityHashMap,
+    ecs::{
+        entity::{EntityHashMap, EntityHashSet},
+        relationship::RelationshipTarget,
+    },
     mesh::MeshTag,
     pbr::ExtendedMaterial,
     platform::collections::{HashMap, HashSet},
@@ -14,7 +17,10 @@ use bevy::{
 
 use crate::{
     asset::{RemapInfo, VatAnimationClip},
-    data::{VatAnimator, VatAnimatorOf, VatClipFinished, VatInstanceData, VatMaterialReady},
+    data::{
+        VatAnimatedMeshes, VatAnimator, VatAnimatorOf, VatClipFinished, VatInstanceData,
+        VatMaterialReady,
+    },
     material::{OpenVatExtension, VatStandardMaterial},
 };
 
@@ -152,95 +158,193 @@ pub fn auto_setup_vat_materials(
     });
 }
 
-/// Updates the animation state for all active VAT instances and syncs data to the GPU.
+/// Writes the GPU instance data of every VAT mesh whose playback state changed.
 ///
-/// Animation time advances on the GPU, so this only does work when an animator, its material,
-/// or a clip changed, an instance was removed, or the shader's wrapped time rolled over.
-/// It batches the instance data by material, updates the corresponding `ShaderBuffer`,
-/// and assigns deterministic `MeshTag` indices to ensure stable rendering.
-#[allow(clippy::too_many_arguments)]
+/// Each mesh owns a stable slot (its `MeshTag`) in its material's instance buffer, handed out
+/// by a per-material free list so despawning one mesh never moves the others. Only dirty slots
+/// are rewritten: a mesh is dirty when its material or link changed, its animator (own or
+/// linked) changed or went away, its clip (re)loaded, or the shader clock wrapped.
 pub fn update_instance_data(
-    mut controller_query: Query<(
+    mut meshes: Query<(
         Entity,
-        Option<&VatAnimator>,
-        Option<&VatAnimatorOf>,
         &mut MeshTag,
         &MeshMaterial3d<VatStandardMaterial>,
+        Option<&VatAnimator>,
+        Option<&VatAnimatorOf>,
     )>,
-    sources: Query<&VatAnimator>,
-    changed: Query<
-        (),
+    changed_meshes: Query<
+        Entity,
         Or<(
-            Changed<VatAnimator>,
             Changed<MeshMaterial3d<VatStandardMaterial>>,
+            Changed<VatAnimatorOf>,
         )>,
     >,
-    mut removed_animators: RemovedComponents<VatAnimator>,
-    mut removed_materials: RemovedComponents<MeshMaterial3d<VatStandardMaterial>>,
+    changed_sources: Query<(Entity, Option<&VatAnimatedMeshes>), Changed<VatAnimator>>,
+    sources: Query<(Entity, &VatAnimator, Option<&VatAnimatedMeshes>)>,
+    animated: Query<&VatAnimatedMeshes>,
+    mut removed_meshes: RemovedComponents<MeshMaterial3d<VatStandardMaterial>>,
+    mut removed_links: RemovedComponents<VatAnimatorOf>,
+    mut removed_sources: RemovedComponents<VatAnimator>,
+    mut clip_events: MessageReader<AssetEvent<VatAnimationClip>>,
     time: Res<Time>,
     mut last_wrap_base: Local<f64>,
     clips: Res<Assets<VatAnimationClip>>,
     materials: Res<Assets<VatStandardMaterial>>,
     mut buffers: ResMut<Assets<ShaderBuffer>>,
+    mut slots: Local<VatSlots>,
 ) {
-    let wrap_base = time.elapsed_secs_f64() - time.elapsed_secs_wrapped_f64();
-    let time_wrapped = wrap_base != *last_wrap_base;
-    *last_wrap_base = wrap_base;
-    // Drain every reader each frame, even when another check already marked us dirty.
-    let removed = removed_animators.read().count() + removed_materials.read().count() > 0;
-    // Asset events for clips are only flushed after this system runs, so watch the collection
-    // itself: a clip that finished loading this frame is picked up this frame.
-    if changed.is_empty() && !removed && !clips.is_changed() && !time_wrapped {
-        return;
-    }
-
-    let mut sorted_entities: Vec<_> = controller_query.iter_mut().collect();
-    sorted_entities.sort_by_key(|(entity, ..)| *entity);
-
-    let mut material_batches: HashMap<AssetId<VatStandardMaterial>, Vec<VatInstanceData>> =
+    let slots = &mut *slots;
+    let mut dirty = EntityHashSet::default();
+    // Slot writes grouped by material: (slot, data).
+    let mut writes: HashMap<AssetId<VatStandardMaterial>, Vec<(u32, VatInstanceData)>> =
         HashMap::new();
 
-    // Build GPU data grouped by material in a deterministic order
-    for (_, own, link, mut mesh_tag, mat_handle) in sorted_entities.into_iter() {
-        let batch = material_batches.entry(mat_handle.0.id()).or_default();
-
-        let index = batch.len() as u32;
-        if mesh_tag.value != index {
-            mesh_tag.value = index;
+    // Gone meshes free their slot and leave it idle.
+    let mut any_removed = false;
+    for entity in removed_meshes.read() {
+        any_removed = true;
+        if let Some((mat_id, slot)) = slots.by_entity.remove(&entity) {
+            if let Some(pool) = slots.by_material.get_mut(&mat_id) {
+                pool.free(slot);
+            }
+            writes
+                .entry(mat_id)
+                .or_default()
+                .push((slot, VatInstanceData::default()));
         }
-
-        let animator = own.or_else(|| link.and_then(|link| sources.get(link.0).ok()));
-        batch.push(
-            animator
-                .and_then(|animator| {
-                    clips
-                        .get(animator.current_clip())
-                        .map(|clip| animator.instance_data(clip, wrap_base))
-                })
-                .unwrap_or_default(),
-        );
     }
+    if any_removed {
+        // Pools of materials that were dropped since the last removal go with them.
+        slots
+            .by_material
+            .retain(|mat_id, _| materials.contains(*mat_id));
+    }
+    // A removed animator leaves its own mesh and its linked meshes idle. A despawned source
+    // also drops the links on its meshes, which `removed_links` catches.
+    for source in removed_sources.read() {
+        dirty.insert(source);
+        if let Ok(linked) = animated.get(source) {
+            dirty.extend(linked.iter());
+        }
+    }
+    dirty.extend(removed_links.read());
 
-    // Sync every VAT material's buffer; materials with no active instances get a single default entry.
-    // Buffers are only written when their contents change.
-    // Bevy rebuilds the material bind group by itself when a buffer is reallocated.
-    let idle = [VatInstanceData::default()];
-    for (mat_id, mat) in materials.iter() {
-        let data = material_batches
-            .get(&mat_id)
-            .map_or(&idle[..], Vec::as_slice);
-        let handle = &mat.extension.instance;
-        if !buffers
-            .get(handle)
-            .is_some_and(|buffer| needs_write(buffer, data))
-        {
+    // New or re-materialised meshes get a slot in their material's buffer.
+    for entity in &changed_meshes {
+        let Ok((_, mut tag, mat_handle, ..)) = meshes.get_mut(entity) else {
             continue;
+        };
+        let mat_id = mat_handle.0.id();
+        let slot = match slots.by_entity.get(&entity).copied() {
+            Some((old_mat, slot)) if old_mat == mat_id => slot,
+            old => {
+                if let Some((old_mat, slot)) = old {
+                    if let Some(pool) = slots.by_material.get_mut(&old_mat) {
+                        pool.free(slot);
+                    }
+                    writes
+                        .entry(old_mat)
+                        .or_default()
+                        .push((slot, VatInstanceData::default()));
+                }
+                let slot = slots.by_material.entry(mat_id).or_default().alloc();
+                slots.by_entity.insert(entity, (mat_id, slot));
+                slot
+            }
+        };
+        if tag.value != slot {
+            tag.value = slot;
         }
-        if let Some(mut buffer) = buffers.get_mut(handle) {
-            buffer.clear();
-            buffer.extend_from_slice(data);
+        dirty.insert(entity);
+    }
+
+    // A changed animator dirties its own mesh and every mesh linked to it.
+    for (source, linked) in &changed_sources {
+        dirty.insert(source);
+        dirty.extend(linked.into_iter().flat_map(VatAnimatedMeshes::iter));
+    }
+
+    // A clip that (re)loaded dirties the sources playing it.
+    let loaded: HashSet<_> = clip_events.read().filter_map(loaded_clip).collect();
+    if !loaded.is_empty() {
+        for (source, animator, linked) in &sources {
+            if loaded.contains(&animator.current_clip().id()) {
+                dirty.insert(source);
+                dirty.extend(linked.into_iter().flat_map(VatAnimatedMeshes::iter));
+            }
         }
     }
+
+    // `globals.time` wraps; the CPU folds the wrap into every offset, so rewrite everything.
+    let wrap_base = time.elapsed_secs_f64() - time.elapsed_secs_wrapped_f64();
+    if wrap_base != *last_wrap_base {
+        *last_wrap_base = wrap_base;
+        dirty.extend(meshes.iter().map(|(entity, ..)| entity));
+    }
+
+    for entity in dirty {
+        // Sources that are not meshes have nothing to write.
+        let Ok((_, tag, mat_handle, own, link)) = meshes.get(entity) else {
+            continue;
+        };
+        let animator = own.or_else(|| {
+            link.and_then(|link| sources.get(link.0).ok().map(|(_, animator, _)| animator))
+        });
+        let data = animator
+            .and_then(|animator| {
+                clips
+                    .get(animator.current_clip())
+                    .map(|clip| animator.instance_data(clip, wrap_base))
+            })
+            .unwrap_or_default();
+        writes
+            .entry(mat_handle.0.id())
+            .or_default()
+            .push((tag.value, data));
+    }
+
+    // Bevy re-uploads a buffer whose asset changed; same size is a plain write, a bigger one
+    // is reallocated and the material's bind group rebuilt.
+    for (mat_id, entries) in writes {
+        let Some(len) = slots.by_material.get(&mat_id).map(|pool| pool.len as usize) else {
+            continue;
+        };
+        let Some(mut buffer) = materials
+            .get(mat_id)
+            .and_then(|mat| buffers.get_mut(&mat.extension.instance))
+        else {
+            continue;
+        };
+        let have = buffer.cast_slice::<VatInstanceData>().map_or(0, <[_]>::len);
+        if have < len {
+            // Buffers only grow, by powers of two; they are not shrunk when a crowd thins out.
+            let grow = len.next_power_of_two() - have;
+            buffer.extend_from_slice(&vec![VatInstanceData::default(); grow]);
+        }
+        let Some(slice) = buffer.cast_slice_mut::<VatInstanceData>() else {
+            continue;
+        };
+        for (slot, data) in entries {
+            slice[slot as usize] = data;
+        }
+    }
+}
+
+/// The id of a clip that just became usable, if `event` says so.
+fn loaded_clip(event: &AssetEvent<VatAnimationClip>) -> Option<AssetId<VatAnimationClip>> {
+    match event {
+        AssetEvent::Added { id }
+        | AssetEvent::Modified { id }
+        | AssetEvent::LoadedWithDependencies { id } => Some(*id),
+        _ => None,
+    }
+}
+
+/// Instance slots handed out per VAT material, kept across frames by `update_instance_data`.
+#[derive(Default)]
+pub struct VatSlots {
+    by_material: HashMap<AssetId<VatStandardMaterial>, SlotPool>,
+    by_entity: EntityHashMap<(AssetId<VatStandardMaterial>, u32)>,
 }
 
 /// Gives VAT meshes a bounding box that covers every animated pose.
@@ -310,6 +414,7 @@ pub fn track_clip_finish(
     all: Query<(Entity, &VatAnimator)>,
     changed: Query<(Entity, &VatAnimator), Changed<VatAnimator>>,
     mut removed: RemovedComponents<VatAnimator>,
+    mut clip_events: MessageReader<AssetEvent<VatAnimationClip>>,
     mut pending: Local<EntityHashMap<(f64, Handle<VatAnimationClip>)>>,
 ) {
     for entity in removed.read() {
@@ -323,10 +428,12 @@ pub fn track_clip_finish(
             None => pending.remove(&entity),
         };
     };
-    if clips.is_changed() {
-        all.iter().for_each(&mut schedule);
-    } else {
-        changed.iter().for_each(&mut schedule);
+    changed.iter().for_each(&mut schedule);
+    let loaded: HashSet<_> = clip_events.read().filter_map(loaded_clip).collect();
+    if !loaded.is_empty() {
+        all.iter()
+            .filter(|(_, animator)| loaded.contains(&animator.current_clip().id()))
+            .for_each(&mut schedule);
     }
 
     let now = time.elapsed_secs_f64();
@@ -342,32 +449,29 @@ pub fn track_clip_finish(
     });
 }
 
-/// Returns `true` if `buffer` does not already hold exactly `data`.
-fn needs_write(buffer: &ShaderBuffer, data: &[VatInstanceData]) -> bool {
-    buffer.cast_slice::<VatInstanceData>() != Some(data)
+/// Free-list allocator for instance slots in one material's buffer.
+#[derive(Default)]
+struct SlotPool {
+    free: Vec<u32>,
+    len: u32,
+}
+
+impl SlotPool {
+    fn alloc(&mut self) -> u32 {
+        self.free.pop().unwrap_or_else(|| {
+            self.len += 1;
+            self.len - 1
+        })
+    }
+
+    fn free(&mut self, slot: u32) {
+        self.free.push(slot);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn instance(rate: f32) -> VatInstanceData {
-        VatInstanceData {
-            rate,
-            ..Default::default()
-        }
-    }
-
-    #[test]
-    fn test_needs_write() {
-        let data = vec![instance(1.0), instance(2.0)];
-        let buffer = ShaderBuffer::from(data.clone());
-
-        assert!(!needs_write(&buffer, &data));
-        assert!(needs_write(&buffer, &[instance(1.0), instance(3.0)]));
-        assert!(needs_write(&buffer, &data[..1]));
-        assert!(needs_write(&ShaderBuffer::default(), &data));
-    }
 
     /// A render-less app running the plugin's systems. `Shader` and `ShaderBuffer` assets are
     /// normally registered by the render plugins the plugin's `build` relies on.
@@ -552,6 +656,191 @@ mod tests {
         app.update();
         // 20 frames at 10 fps is a 2 s clip; rate is speed / duration.
         assert_eq!(instance_at(&app, mesh).rate, 1.0);
+    }
+
+    /// Spawns an entity that is both the animator and the mesh.
+    fn spawn_vat(
+        app: &mut App,
+        animator: &VatAnimator,
+        material: &Handle<StandardMaterial>,
+    ) -> Entity {
+        app.world_mut()
+            .spawn((animator.clone(), MeshMaterial3d(material.clone())))
+            .id()
+    }
+
+    fn tag_of(app: &App, entity: Entity) -> u32 {
+        app.world().get::<MeshTag>(entity).unwrap().value
+    }
+
+    /// The whole instance buffer of `mesh`'s material.
+    fn buffer_of(app: &App, mesh: Entity) -> Vec<VatInstanceData> {
+        let world = app.world();
+        let material = world
+            .get::<MeshMaterial3d<VatStandardMaterial>>(mesh)
+            .unwrap();
+        let buffer = world
+            .resource::<Assets<VatStandardMaterial>>()
+            .get(&material.0)
+            .unwrap()
+            .extension
+            .instance
+            .clone();
+        world
+            .resource::<Assets<ShaderBuffer>>()
+            .get(&buffer)
+            .unwrap()
+            .cast_slice::<VatInstanceData>()
+            .unwrap()
+            .to_vec()
+    }
+
+    #[test]
+    fn test_slot_pool_reuses_freed_slots() {
+        let mut p = SlotPool::default();
+        assert_eq!((p.alloc(), p.alloc(), p.alloc()), (0, 1, 2));
+        p.free(1);
+        assert_eq!(p.alloc(), 1);
+        assert_eq!(p.alloc(), 3);
+        assert_eq!(p.len, 4);
+    }
+
+    #[test]
+    fn test_slots_survive_despawn() {
+        let mut app = test_app();
+        let animator = animator(&mut app);
+        let material = std_material(&mut app);
+        let [a, b, c] = [(); 3].map(|_| spawn_vat(&mut app, &animator, &material));
+        app.update();
+        app.update();
+        let mut tags = [a, b, c].map(|e| tag_of(&app, e));
+        tags.sort();
+        assert_eq!(tags, [0, 1, 2]);
+        let (tag_a, tag_b, tag_c) = (tag_of(&app, a), tag_of(&app, b), tag_of(&app, c));
+
+        app.world_mut().despawn(b);
+        app.update();
+        assert_eq!(
+            (tag_of(&app, a), tag_of(&app, c)),
+            (tag_a, tag_c),
+            "slots must not shift"
+        );
+        assert_eq!(
+            buffer_of(&app, a)[tag_b as usize],
+            VatInstanceData::default()
+        );
+
+        let d = spawn_vat(&mut app, &animator, &material);
+        app.update();
+        app.update();
+        assert_eq!(tag_of(&app, d), tag_b, "freed slot is reused");
+    }
+
+    #[test]
+    fn test_only_changed_instance_is_rewritten() {
+        let mut app = test_app();
+        let animator = animator(&mut app);
+        let material = std_material(&mut app);
+        let a = spawn_vat(&mut app, &animator, &material);
+        let b = spawn_vat(&mut app, &animator, &material);
+        app.update();
+        app.update();
+        app.update();
+        let (tag_a, tag_b) = (tag_of(&app, a), tag_of(&app, b));
+
+        // Poison B's slot behind the plugin's back; a dirty-only writer leaves it alone.
+        let sentinel = VatInstanceData {
+            start_frame: 12345,
+            ..default()
+        };
+        let buffer = app
+            .world()
+            .resource::<Assets<VatStandardMaterial>>()
+            .get(
+                &app.world()
+                    .get::<MeshMaterial3d<VatStandardMaterial>>(a)
+                    .unwrap()
+                    .0,
+            )
+            .unwrap()
+            .extension
+            .instance
+            .clone();
+        app.world_mut()
+            .resource_mut::<Assets<ShaderBuffer>>()
+            .get_mut(&buffer)
+            .unwrap()
+            .cast_slice_mut::<VatInstanceData>()
+            .unwrap()[tag_b as usize] = sentinel;
+
+        let time = *app.world().resource::<Time>();
+        app.world_mut()
+            .get_mut::<VatAnimator>(a)
+            .unwrap()
+            .set_speed(2.0, &time);
+        app.update();
+        let after = buffer_of(&app, a);
+        assert_eq!(after[tag_a as usize].rate, 1.0);
+        assert_eq!(after[tag_b as usize], sentinel);
+    }
+
+    #[test]
+    fn test_clip_load_updates_its_users() {
+        let mut app = test_app();
+        let mut animator_a = animator(&mut app);
+        let material = std_material(&mut app);
+        let pending = app
+            .world_mut()
+            .resource_mut::<Assets<VatAnimationClip>>()
+            .reserve_handle();
+        let animator_b = animator_a.clone();
+        animator_a.play(pending.clone(), app.world().resource::<Time>());
+        let a = spawn_vat(&mut app, &animator_a, &material);
+        let b = spawn_vat(&mut app, &animator_b, &material);
+        app.update();
+        app.update();
+        assert_eq!(instance_at(&app, a), VatInstanceData::default());
+        assert_eq!(instance_at(&app, b).frame_count, 20);
+
+        app.world_mut()
+            .resource_mut::<Assets<VatAnimationClip>>()
+            .insert(
+                &pending,
+                VatAnimationClip {
+                    start_frame: 5,
+                    end_frame: 25,
+                    frame_rate: 10.0,
+                    looping: true,
+                },
+            )
+            .unwrap();
+        app.update();
+        app.update();
+        assert_eq!(instance_at(&app, a).start_frame, 5);
+        assert_eq!(instance_at(&app, a).frame_count, 20);
+    }
+
+    #[test]
+    fn test_idle_frame_does_not_touch_buffers() {
+        #[derive(Resource, Default)]
+        struct Touched(bool);
+        let mut app = test_app();
+        app.init_resource::<Touched>().add_systems(
+            Last,
+            |buffers: Res<Assets<ShaderBuffer>>, mut touched: ResMut<Touched>| {
+                touched.0 = buffers.is_changed();
+            },
+        );
+        let animator = animator(&mut app);
+        let material = std_material(&mut app);
+        spawn_vat(&mut app, &animator, &material);
+        app.update();
+        app.update();
+        app.update();
+        assert!(
+            !app.world().resource::<Touched>().0,
+            "idle frame must not write"
+        );
     }
 
     #[test]
