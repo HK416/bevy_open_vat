@@ -11,7 +11,7 @@
 - **GPU-Powered Animation:** Decodes position and normal offsets directly in the vertex shader for maximum efficiency.
 - **High Performance Instancing:** Uses `StorageBuffers` to render thousands of animated entities with few draw calls.
 - **Smooth Interpolation:** Supports frame blending for fluid animation playback.
-- **PBR Compatible:** Built on top of Bevy's `StandardMaterial`, fully supporting lighting, shadows, and depth pre-pass.
+- **PBR Compatible:** Built on top of Bevy's `StandardMaterial`, fully supporting lighting, shadows, normal maps, vertex colors, motion vectors (TAA) and the depth pre-pass.
 - **Flexible Control:** Per-entity play, pause, seek, and speed control without animation pops, plus one-shot clips with a `VatClipFinished` event.
 
 ## Installation
@@ -113,6 +113,9 @@ there. Meshes added under the parent later (for example equipment) are linked wh
   format works. An EXR loads as `Rgba32Float` with a CPU copy; the plugin converts it to
   `Rgba16Unorm` (OpenVAT data is normalized to [0, 1]) and drops the CPU copy, halving VRAM
   and freeing the RAM. Textures in any other format, such as KTX2, are used as they are.
+* **Material snapshot:** The VAT material is built once from the `StandardMaterial` and the
+  `RemapInfo` it finds; later changes to those assets are not propagated. Replace the
+  `MeshMaterial3d<StandardMaterial>` to rebuild.
 
 ### Web support
 
@@ -161,6 +164,10 @@ To use this plugin, you need exported VAT assets. Typically, this includes:
 * **glTF Settings:** When exporting the glTF, ensure the following data is **EXCLUDED** (unchecked):
     * Animation Data
     * Skinning Data
+
+## Migrating
+
+Upgrade notes between versions are in [MIGRATIONS.md](MIGRATIONS.md).
 
 ## License
 
