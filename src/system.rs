@@ -85,10 +85,7 @@ pub fn auto_setup_vat_materials(
             Option<&VatAnimatorOf>,
             &MeshMaterial3d<StandardMaterial>,
         ),
-        (
-            Without<VatMaterialReady>,
-            Or<(With<VatAnimator>, With<VatAnimatorOf>)>,
-        ),
+        Or<(With<VatAnimator>, With<VatAnimatorOf>)>,
     >,
     sources: Query<&VatAnimator>,
     remap_infos: Res<Assets<RemapInfo>>,
@@ -841,6 +838,37 @@ pub(crate) mod tests {
             !app.world().resource::<Touched>().0,
             "idle frame must not write"
         );
+    }
+
+    #[test]
+    fn test_replacing_standard_material_rebuilds_vat_material() {
+        let mut app = test_app();
+        let animator = animator(&mut app);
+        let material = std_material(&mut app);
+        let entity = spawn_vat(&mut app, &animator, &material);
+        app.update();
+        app.update();
+        let first = app
+            .world()
+            .get::<MeshMaterial3d<VatStandardMaterial>>(entity)
+            .unwrap()
+            .0
+            .clone();
+
+        // Swapping the source material (as the README suggests) must rebuild the VAT one.
+        let replacement = std_material(&mut app);
+        app.world_mut()
+            .entity_mut(entity)
+            .insert(MeshMaterial3d(replacement));
+        app.update();
+        app.update();
+        assert!(!has::<MeshMaterial3d<StandardMaterial>>(&app, entity));
+        let second = &app
+            .world()
+            .get::<MeshMaterial3d<VatStandardMaterial>>(entity)
+            .unwrap()
+            .0;
+        assert_ne!(*second, first, "a new VAT material must be built");
     }
 
     #[test]
