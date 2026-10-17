@@ -1,5 +1,5 @@
 import bevy_pbr::render::{
-    mesh_functions::{get_tag, get_world_from_local, mesh_position_local_to_world, mesh_normal_local_to_world},
+    mesh_functions::{get_tag, get_world_from_local, mesh_position_local_to_world, mesh_normal_local_to_world, mesh_tangent_local_to_world, get_visibility_range_dither_level},
     view_transformations::position_world_to_clip,
     forward_io::{Vertex, VertexOutput, decompress_vertex},
     mesh_view_bindings::globals,
@@ -36,6 +36,27 @@ fn main(vertex_in: Vertex) -> VertexOutput {
 
     @if(VERTEX_UVS_B)
     out.uv_b = vertex.uv_b;
+
+    @if(VERTEX_TANGENTS) {
+        // Tangents are not baked into the VAT, so the rest-pose tangent is re-orthogonalized
+        // against the animated normal. When the two become parallel the projection vanishes;
+        // keep the rest tangent then instead of normalizing a zero vector into NaN.
+        let t = vertex.tangent.xyz;
+        let ortho = t - new_normal * dot(new_normal, t);
+        let len_sq = dot(ortho, ortho);
+        let safe_t = select(t, ortho * inverseSqrt(len_sq), len_sq > 1e-8);
+        out.world_tangent = mesh_tangent_local_to_world(world_from_local, vec4<f32>(safe_t, vertex.tangent.w), vertex.instance_index);
+    }
+
+    @if(VERTEX_COLORS)
+    out.color = vertex.color;
+
+    // The fragment shader reads this mesh's flags and material slot through `instance_index`.
+    @if(VERTEX_OUTPUT_INSTANCE_INDEX)
+    out.instance_index = vertex.instance_index;
+
+    @if(VISIBILITY_RANGE_DITHER)
+    out.visibility_range_dither = get_visibility_range_dither_level(vertex.instance_index, world_from_local[3]);
 
     return out;
 }
