@@ -470,12 +470,12 @@ impl SlotPool {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// A render-less app running the plugin's systems. `Shader` and `ShaderBuffer` assets are
     /// normally registered by the render plugins the plugin's `build` relies on.
-    fn test_app() -> App {
+    pub(crate) fn test_app() -> App {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, AssetPlugin::default()))
             .init_asset::<Shader>()
@@ -487,7 +487,7 @@ mod tests {
         app
     }
 
-    fn remap_handle(app: &mut App) -> Handle<RemapInfo> {
+    pub(crate) fn remap_handle(app: &mut App) -> Handle<RemapInfo> {
         app.world_mut()
             .resource_mut::<Assets<RemapInfo>>()
             .add(RemapInfo {
@@ -519,7 +519,7 @@ mod tests {
         VatAnimator::new(remap, image, clip)
     }
 
-    fn std_material(app: &mut App) -> Handle<StandardMaterial> {
+    pub(crate) fn std_material(app: &mut App) -> Handle<StandardMaterial> {
         app.world_mut()
             .resource_mut::<Assets<StandardMaterial>>()
             .add(StandardMaterial::default())

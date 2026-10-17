@@ -53,8 +53,9 @@ fn setup(
     // Manually create RemapInfo for the procedural animation.
     let remap_info = remap_infos.add(RemapInfo {
         os_remap: OsRemap {
-            min: [0.0, 0.0, 0.0],
-            max: [1.0, 1.0, 1.0],
+            // The texture stores the bounce normalized to [0, 1]; Blender Z is Bevy Y.
+            min: [0.0, 0.0, -2.0],
+            max: [1.0, 1.0, 2.0],
             frames: frame_count,
         },
         animations: HashMap::new(), // Not used directly when manually constructing
@@ -130,7 +131,7 @@ fn create_bounce_texture(vertex_count: u32, frame_count: u32) -> Image {
     for f in 0..frame_count {
         for _v in 0..vertex_count {
             let t = (f as f32 / frame_count as f32) * std::f32::consts::TAU;
-            let y_offset = t.sin() * 2.0;
+            let y_offset = (t.sin() + 1.0) * 0.5; // [0, 1], remapped to [-2, 2]
             data.extend_from_slice(&0.0f32.to_le_bytes()); // X
             data.extend_from_slice(&0.0f32.to_le_bytes()); // Y
             data.extend_from_slice(&y_offset.to_le_bytes()); // Z
@@ -142,7 +143,7 @@ fn create_bounce_texture(vertex_count: u32, frame_count: u32) -> Image {
     // Normals are encoded as (n + 1.0) / 2.0 to map [-1, 1] → [0, 1]
     // Shader decodes with: n * 2.0 - 1.0
     // For a Z-up normal in Blender space (0, 0, 1): encoded = (0.5, 0.5, 1.0)
-    for _f in 0..frame_count + 1 {
+    for _f in 0..frame_count {
         for _v in 0..vertex_count {
             data.extend_from_slice(&0.5f32.to_le_bytes()); // X: (0+1)/2
             data.extend_from_slice(&0.5f32.to_le_bytes()); // Y: (0+1)/2
@@ -154,7 +155,7 @@ fn create_bounce_texture(vertex_count: u32, frame_count: u32) -> Image {
     Image::new(
         Extent3d {
             width: vertex_count,
-            height: frame_count + frame_count + 1,
+            height: frame_count * 2,
             depth_or_array_layers: 1,
         },
         TextureDimension::D2,

@@ -528,7 +528,7 @@ fn fox_animates_on_gpu_and_pauses() {
         .spawn((
             WorldAssetRoot(scene),
             Transform::from_scale(Vec3::splat(0.01)),
-            VatAnimator::new(remap, texture, clip),
+            VatAnimator::new(remap, texture.clone(), clip),
         ))
         .id();
 
@@ -554,6 +554,17 @@ fn fox_animates_on_gpu_and_pauses() {
     let paused_b = capture(&mut app, &target, "fox_paused_b");
 
     assert_no_errors();
+    let fox_texture = app
+        .world()
+        .resource::<Assets<Image>>()
+        .get(&texture)
+        .expect("fox texture loaded");
+    assert_eq!(
+        fox_texture.texture_descriptor.format,
+        TextureFormat::Rgba16Unorm,
+        "EXR must be compacted before the fox is drawn"
+    );
+    assert!(fox_texture.data.is_none(), "CPU copy must be dropped after upload");
     let clear = app
         .world()
         .resource::<ClearColor>()

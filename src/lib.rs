@@ -11,6 +11,8 @@ pub mod material;
 pub mod plugin;
 /// Systems for auto-setup and updating VAT animations.
 pub mod system;
+/// Compaction of loaded VAT textures.
+pub mod texture;
 
 /// Prelude module containing commonly used types and components.
 pub mod prelude {

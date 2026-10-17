@@ -109,8 +109,10 @@ there. Meshes added under the parent later (for example equipment) are linked wh
   never drops a mesh whose animated pose leaves its rest-pose bounds.
 * **Vertex compression:** Meshes using Bevy's vertex attribute compression (`Mesh::compress_*`)
   are supported, which can cut vertex bandwidth for large crowds.
-* **Texture format:** The VAT texture is read with exact texel loads, so it works with
-  non-filterable formats such as the `Rgba32Float` that EXR files load as.
+* **Texture format:** The VAT texture is read with exact texel loads, so any float or unorm
+  format works. An EXR loads as `Rgba32Float` with a CPU copy; the plugin converts it to
+  `Rgba16Unorm` (OpenVAT data is normalized to [0, 1]) and drops the CPU copy, halving VRAM
+  and freeing the RAM. Textures in any other format, such as KTX2, are used as they are.
 
 ### Web support
 
