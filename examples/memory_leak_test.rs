@@ -1,18 +1,23 @@
 use bevy::{
+    asset::RenderAssetUsages,
     pbr::ExtendedMaterial,
     prelude::*,
-    render::storage::ShaderBuffer,
+    render::{
+        render_resource::{Extent3d, TextureDimension, TextureFormat},
+        storage::ShaderBuffer,
+    },
 };
-use bevy_open_vat::{
-    data::VatAnimator, material::OpenVatExtension, plugin::OpenVatPlugin,
-};
+use bevy_open_vat::{data::VatAnimator, material::OpenVatExtension, plugin::OpenVatPlugin};
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugins(OpenVatPlugin)
         .add_systems(Startup, setup)
-        .add_systems(Update, (spawn_and_despawn_system, debug_asset_counts_system))
+        .add_systems(
+            Update,
+            (spawn_and_despawn_system, debug_asset_counts_system),
+        )
         .run();
 }
 
@@ -38,25 +43,46 @@ fn setup(
         Transform::from_xyz(5.0, 5.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
     ));
 
-    let mut dummy_image = Image::default();
-    dummy_image.texture_descriptor.size.height = 64;
-    dummy_image.texture_descriptor.size.width = 64;
-    dummy_image.data = vec![0u8; 64 * 64 * 4].into();
-    let vat_texture = images.add(dummy_image);
+    let mut mesh = Cuboid::new(1.0, 1.0, 1.0).mesh().build();
+    let vertex_count = mesh.count_vertices();
+    let frames = 64;
+    let height = frames * 2;
+
+    // One texture column per vertex: 0.5 texels encode a zero position offset in the upper
+    // half, and in the lower half a normal that decodes to (0, 0, 1) in Blender space (up).
+    // Not sRGB: VAT texels are data, and 128 must read back as 0.5.
+    let mut data = vec![128u8; vertex_count * height * 4];
+    for texel in data[vertex_count * frames * 4..].as_chunks_mut::<4>().0 {
+        texel[2] = 255;
+    }
+    let vat_texture = images.add(Image::new(
+        Extent3d {
+            width: vertex_count as u32,
+            height: height as u32,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        data,
+        TextureFormat::Rgba8Unorm,
+        RenderAssetUsages::RENDER_WORLD,
+    ));
+
+    // UV1 points each vertex at its own column in frame 0.
+    mesh.insert_attribute(
+        Mesh::ATTRIBUTE_UV_1,
+        (0..vertex_count)
+            .map(|i| [(i as f32 + 0.5) / vertex_count as f32, 0.5 / height as f32])
+            .collect::<Vec<_>>(),
+    );
 
     let remap_info = remap_infos.add(bevy_open_vat::asset::RemapInfo {
         os_remap: bevy_open_vat::asset::OsRemap {
             min: [-1.0, -1.0, -1.0],
             max: [1.0, 1.0, 1.0],
-            frames: 64,
+            frames: frames as u32,
         },
         animations: bevy::platform::collections::HashMap::new(),
     });
-
-    let mut mesh = Cuboid::new(1.0, 1.0, 1.0).mesh().build();
-    if let Some(uvs) = mesh.attribute(Mesh::ATTRIBUTE_UV_0) {
-        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_1, uvs.clone());
-    }
 
     commands.insert_resource(LeakTestAssets {
         mesh: meshes.add(mesh),
