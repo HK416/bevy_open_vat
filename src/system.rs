@@ -7,7 +7,7 @@ use bevy::{
     ecs::entity::EntityHashMap,
     mesh::MeshTag,
     pbr::ExtendedMaterial,
-    platform::collections::HashMap,
+    platform::collections::{HashMap, HashSet},
     prelude::*,
     render::storage::ShaderBuffer,
 };
@@ -228,9 +228,21 @@ pub fn update_vat_aabbs(
             Or<(Without<NoAutoAabb>, Changed<Mesh3d>, AssetChanged<Mesh3d>)>,
         ),
     >,
+    mut warned_meshes: Local<HashSet<AssetId<Mesh>>>,
 ) {
     for (entity, mesh, animator) in &query {
-        let Some(rest) = meshes.get(mesh).and_then(|mesh| mesh.get_aabb()) else {
+        let Some(mesh_asset) = meshes.get(mesh) else {
+            continue;
+        };
+        // Once per mesh asset, not per entity or per frame: a crowd shares one mesh, and this
+        // entity is revisited every frame until its remap loads.
+        if !mesh_asset.contains_attribute(Mesh::ATTRIBUTE_UV_1) && warned_meshes.insert(mesh.id()) {
+            warn!(
+                "VAT mesh {:?} on {entity} has no UV1 (Mesh::ATTRIBUTE_UV_1); the VAT shader cannot compile without it",
+                mesh.id()
+            );
+        }
+        let Some(rest) = mesh_asset.get_aabb() else {
             continue;
         };
         let Some(remap) = remap_infos.get(&animator.remap_info) else {

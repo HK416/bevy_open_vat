@@ -67,6 +67,27 @@ impl VatAnimationClip {
         self.end_frame.saturating_sub(self.start_frame)
     }
 
+    /// Checks the clip against the VAT texture's frame count. The loader warns about clips
+    /// that fail, since they play as a frozen or garbled pose with no other diagnostic.
+    pub fn validate(&self, texture_frames: u32) -> Result<(), String> {
+        if self.frame_rate <= 0.0 {
+            return Err(format!("framerate {} is not positive", self.frame_rate));
+        }
+        if self.end_frame <= self.start_frame {
+            return Err(format!(
+                "endFrame {} is not after startFrame {}",
+                self.end_frame, self.start_frame
+            ));
+        }
+        if self.end_frame > texture_frames {
+            return Err(format!(
+                "endFrame {} exceeds the texture's {texture_frames} frames",
+                self.end_frame
+            ));
+        }
+        Ok(())
+    }
+
     /// Gets the duration of the clip in seconds.
     /// Returns `None` if the clip has zero frames or an invalid frame rate.
     pub fn duration(&self) -> Option<f32> {
@@ -130,7 +151,10 @@ impl AssetLoader for RemapInfoAssetLoader {
 
             // Register each animation clip as a sub-asset
             for (name, clip) in &remap_info.animations {
-                load_context.add_labeled_asset(name.clone(), clip.clone());
+                if let Err(why) = clip.validate(remap_info.os_remap.frames) {
+                    warn!("{}: clip `{name}`: {why}", load_context.path());
+                }
+                load_context.add_labeled_asset(name.clone(), *clip);
             }
 
             Ok(remap_info)
@@ -221,6 +245,23 @@ mod tests {
         // Medium #5: must NOT panic, should return 0 via saturating_sub
         let clip = make_clip(100, 50, 30.0, true);
         assert_eq!(clip.frame_count(), 0);
+    }
+
+    #[test]
+    fn test_validate_clip() {
+        assert_eq!(make_clip(0, 60, 30.0, true).validate(128), Ok(()));
+        assert_eq!(
+            make_clip(0, 200, 30.0, true).validate(128),
+            Err("endFrame 200 exceeds the texture's 128 frames".to_string())
+        );
+        assert_eq!(
+            make_clip(50, 10, 30.0, true).validate(128),
+            Err("endFrame 10 is not after startFrame 50".to_string())
+        );
+        assert_eq!(
+            make_clip(0, 60, 0.0, true).validate(128),
+            Err("framerate 0 is not positive".to_string())
+        );
     }
 
     #[test]
